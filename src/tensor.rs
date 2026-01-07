@@ -1,4 +1,5 @@
 use crate::backend::Backend;
+use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use std::{
@@ -11,7 +12,7 @@ macro_rules! impl_binary_op {
     ($($trait:ident, $method:ident);* $(;)?) => {
         $(
             // 1. Owned implementation: a + b
-            impl $trait for Tensor {
+            impl<T: DType> $trait for Tensor<T> {
                 type Output = Self;
                 fn $method(self, rhs: Self) -> Self::Output {
                     self.backend.$method(&self, &rhs)
@@ -19,9 +20,9 @@ macro_rules! impl_binary_op {
             }
 
             // 2. Reference implementation: &a + &b
-            impl<'a, 'b> $trait<&'b Tensor> for &'a Tensor {
-                type Output = Tensor;
-                fn $method(self, rhs: &'b Tensor) -> Self::Output {
+            impl<'a, 'b, T: DType> $trait<&'b Tensor<T>> for &'a Tensor<T> {
+                type Output = Tensor<T>;
+                fn $method(self, rhs: &'b Tensor<T>) -> Self::Output {
                     self.backend.$method(self, rhs)
                 }
             }
@@ -29,20 +30,13 @@ macro_rules! impl_binary_op {
     };
 }
 
-#[rustfmt::skip]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DType {
-    U8, U16, U32, U64, I8, I16, I32, I64, F32, F64,
-}
-
 #[derive(Debug, Clone)]
-pub struct Tensor {
-    storage:       TensorStorage,
+pub struct Tensor<T: DType> {
+    storage:       TensorStorage<T>,
     layout:        TensorLayout,
-    dtype:         DType,
-    backend:       Arc<dyn Backend>,
+    backend:       Arc<dyn Backend<T>>,
     requires_grad: bool,
-    grad:          Option<Box<Tensor>>,
+    grad:          Option<Box<Tensor<T>>>,
 }
 
 impl_binary_op!(
@@ -52,14 +46,13 @@ impl_binary_op!(
     Div, div
 );
 
-impl Tensor {
-    pub fn zeros(layout: TensorLayout, dtype: DType, backend: Arc<dyn Backend>) -> Self {
-        let storage = backend.alloc_storage(&layout, dtype);
+impl<T: DType> Tensor<T> {
+    pub fn zeros(layout: TensorLayout, backend: Arc<dyn Backend<T>>) -> Self {
+        let storage = backend.alloc_storage(&layout);
 
         Tensor {
             storage,
             layout,
-            dtype,
             backend,
             requires_grad: false,
             grad: None,

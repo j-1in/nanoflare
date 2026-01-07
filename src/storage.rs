@@ -1,4 +1,4 @@
-use crate::tensor::DType;
+use crate::dtype::DType;
 use std::{
     fmt::Debug,
     ops::{Index, IndexMut},
@@ -6,39 +6,37 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub enum TensorStorage {
-    Cpu(Arc<RwLock<CpuStorage>>),
-    Cuda(Arc<RwLock<CudaStorage>>),
+pub enum TensorStorage<T: DType> {
+    Cpu(Arc<RwLock<CpuStorage<T>>>),
+    Cuda(Arc<RwLock<CudaStorage<T>>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum CpuStorage {
-    U8(Vec<u8>),
-    U16(Vec<u16>),
-    U32(Vec<u32>),
-    U64(Vec<u64>),
-    I8(Vec<i8>),
-    I16(Vec<i16>),
-    I32(Vec<i32>),
-    I64(Vec<i64>),
-    F32(Vec<f32>),
-    F64(Vec<f64>),
-}
+pub struct CpuStorage<T: DType>(Vec<T>);
 
-impl Index<usize> for CpuStorage {
-    type Output =;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.
+impl<T: DType> CpuStorage<T> {
+    pub fn zeros(size: usize) -> Self {
+        let data: Vec<T> = vec![T::zero(); size];
+        CpuStorage(data)
     }
 }
 
-impl IndexMut<usize> for CpuStorage {
+impl<T: DType> Index<usize> for CpuStorage<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<T: DType> IndexMut<usize> for CpuStorage<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        todo!()
+        &mut self.0[index]
     }
 }
 
 /// UNIMPLEMENTED
 #[derive(Debug, Clone, PartialEq)]
-pub enum CudaStorage {}
+pub struct CudaStorage<T: DType> {
+    data: Vec<T>, // Placeholder for compilation
+}

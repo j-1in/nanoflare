@@ -3,28 +3,6 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-macro_rules! impl_binary_op {
-    ($($trait:ident, $method:ident);* $(;)?) => {
-        $(
-            // 1. Owned implementation: a + b
-            impl $trait for Tensor {
-                type Output = Self;
-                fn $method(self, rhs: Self) -> Self::Output {
-                    self.backend.$method(&self, &rhs)
-                }
-            }
-
-            // 2. Reference implementation: &a + &b
-            impl<'a, 'b> $trait<&'b Tensor> for &'a Tensor {
-                type Output = Tensor;
-                fn $method(self, rhs: &'b Tensor) -> Self::Output {
-                    self.backend.$method(self, rhs)
-                }
-            }
-        )*
-    };
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct TensorLayout {
     shape:  TensorShape,

@@ -1,7 +1,8 @@
 use super::Backend;
 use crate::layout::TensorLayout;
-use crate::storage::{CpuStorage, TensorStorage};
-use crate::tensor::{DType, Tensor};
+use crate::storage::TensorStorage;
+use crate::tensor::Tensor;
+use crate::{dtype::DType, storage::CpuStorage};
 use std::{
     fmt::Debug,
     sync::{Arc, RwLock},
@@ -16,47 +17,36 @@ impl CpuBackend {
     }
 }
 
-impl Backend for CpuBackend {
-    fn alloc_storage(&self, layout: &TensorLayout, dtype: DType) -> TensorStorage {
+impl<T: DType> Backend<T> for CpuBackend {
+    fn alloc_storage(&self, layout: &TensorLayout) -> TensorStorage<T> {
         let size = layout.shape().size();
 
-        let storage = match dtype {
-            DType::U8 => CpuStorage::U8(vec![0u8; size]),
-            DType::U16 => CpuStorage::U16(vec![0u16; size]),
-            DType::U32 => CpuStorage::U32(vec![0u32; size]),
-            DType::U64 => CpuStorage::U64(vec![0u64; size]),
-            DType::I8 => CpuStorage::I8(vec![0i8; size]),
-            DType::I16 => CpuStorage::I16(vec![0i16; size]),
-            DType::I32 => CpuStorage::I32(vec![0i32; size]),
-            DType::I64 => CpuStorage::I64(vec![0i64; size]),
-            DType::F32 => CpuStorage::F32(vec![0f32; size]),
-            DType::F64 => CpuStorage::F64(vec![0f64; size]),
-        };
+        let storage = CpuStorage::zeros(size);
 
         TensorStorage::Cpu(Arc::new(RwLock::new(storage)))
     }
 
-    fn add(&self, a: &Tensor, b: &Tensor) -> Tensor {
+    fn add(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn sub(&self, a: &Tensor, b: &Tensor) -> Tensor {
+    fn sub(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn mul(&self, a: &Tensor, b: &Tensor) -> Tensor {
+    fn mul(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn div(&self, a: &Tensor, b: &Tensor) -> Tensor {
+    fn div(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn matmul(&self, a: &Tensor, b: &Tensor) -> Tensor {
+    fn matmul(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
         todo!()
     }
 }
@@ -69,8 +59,8 @@ mod tests {
     fn tensor_addition() {
         let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
         let layout = TensorLayout::new(vec![2, 2]);
-        let a = Tensor::zeros(layout.clone(), DType::F32, backend.clone());
-        let b = Tensor::zeros(layout.clone(), DType::F32, backend.clone());
+        let a = Tensor::<u32>::zeros(layout.clone(), backend.clone());
+        let b = Tensor::zeros(layout.clone(), backend.clone());
         let c = &a + &b;
 
         assert_eq!(c.layout(), &layout);
