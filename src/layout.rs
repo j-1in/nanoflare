@@ -35,7 +35,7 @@ impl TensorLayout {
         stride
     }
 
-    fn ravel_index(&self, indices: &[usize]) -> usize {
+    pub fn ravel_index(&self, indices: &[usize]) -> usize {
         if indices.len() != self.shape.len() {
             panic!("Indices length does not match tensorshape dimensions.");
         }
@@ -46,7 +46,8 @@ impl TensorLayout {
             .fold(0usize, |acc, (idx, stride)| acc + idx * stride)
     }
 
-    fn unravel_index(&self, index: usize) -> Vec<usize> {
+    /// FIXME
+    pub fn unravel_index(&self, index: usize) -> Vec<usize> {
         if self.shape.is_empty() {
             return vec![];
         }

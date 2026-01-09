@@ -14,7 +14,15 @@ use std::{
 struct CudaBackend;
 
 impl<T: DType> Backend<T> for CudaBackend {
-    fn alloc_storage(&self, layout: &TensorLayout) -> TensorStorage<T> {
+    fn store_zeros(&self, layout: &TensorLayout) -> TensorStorage<T> {
+        unimplemented!()
+    }
+
+    fn store_ones(&self, layout: &TensorLayout) -> TensorStorage<T> {
+        unimplemented!()
+    }
+
+    fn from_vec(&self, data: Vec<T>) -> TensorStorage<T> {
         unimplemented!()
     }
 

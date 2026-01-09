@@ -4,7 +4,7 @@ use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use std::{
     fmt::Debug,
-    ops::{Add, Div, Index, IndexMut, Mul, Sub},
+    ops::{Add, Div, Index, Mul, Sub},
     sync::Arc,
 };
 
@@ -48,7 +48,7 @@ impl_binary_op!(
 
 impl<T: DType> Tensor<T> {
     pub fn zeros(layout: TensorLayout, backend: Arc<dyn Backend<T>>) -> Self {
-        let storage = backend.alloc_storage(&layout);
+        let storage = backend.store_zeros(&layout);
 
         Tensor {
             storage,
@@ -61,5 +61,13 @@ impl<T: DType> Tensor<T> {
 
     pub fn layout(&self) -> &TensorLayout {
         &self.layout
+    }
+}
+
+impl<T: DType> Index<&[usize]> for Tensor<T> {
+    type Output = T;
+
+    fn index(&self, indices: &[usize]) -> &Self::Output {
+        &self.storage[self.layout.ravel_index(indices)]
     }
 }

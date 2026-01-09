@@ -1,7 +1,7 @@
-use num_traits::Zero;
+use num_traits::{One, Zero};
 use std::fmt::Debug;
 
-pub trait DType: Debug + Copy + Clone + PartialEq + Zero {}
+pub trait DType: Debug + Copy + Clone + PartialEq + Zero + One {}
 
 macro_rules! dtype_trait_impl {
     ($name:ident for $($t:ty)*) => ($(
