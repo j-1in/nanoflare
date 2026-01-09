@@ -77,14 +77,16 @@ impl<T: DType> Tensor<T> {
         })
     }
 
-    pub fn merge(&self, dim_range: RangeInclusive<usize>) -> Self {
-        Tensor {
-            layout:        self.layout.merge(dim_range),
-            storage:       self.storage.clone(),
-            backend:       self.backend.clone(),
+    pub fn merge(&self, dim_range: RangeInclusive<usize>) -> Result<Self> {
+        let layout = self.layout.merge(dim_range)?;
+
+        Ok(Tensor {
+            layout,
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
             requires_grad: self.requires_grad.clone(),
-            grad:          self.grad.clone(),
-        }
+            grad: self.grad.clone(),
+        })
     }
 }
 
@@ -92,6 +94,10 @@ impl<T: DType> Index<&[usize]> for Tensor<T> {
     type Output = T;
 
     fn index(&self, indices: &[usize]) -> &Self::Output {
-        &self.storage[self.layout.ravel_index(indices)]
+        let idx = self
+            .layout
+            .ravel_index(indices)
+            .expect("invalid index for tensor");
+        &self.storage[idx]
     }
 }

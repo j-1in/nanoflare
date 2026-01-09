@@ -32,20 +32,45 @@ impl TensorLayout {
         strides
     }
 
-    pub fn ravel_index(&self, indices: &[usize]) -> usize {
-        if indices.len() != self.shape.len() {
-            panic!("Indices length does not match tensorshape dimensions.");
+    /// Convert multi-dimensional indices into a flat (raveled) index.
+    ///
+    /// Returns an error if the number of indices doesn't match the tensor
+    /// rank or if any index is out of bounds for its corresponding axis.
+    pub fn ravel_index(&self, indices: &[usize]) -> Result<usize> {
+        let rank = self.shape.len();
+        if indices.len() != rank {
+            return Err(crate::Error::RankMismatch {
+                expected: rank,
+                got:      indices.len(),
+            });
         }
 
-        indices
+        // Check each index is within bounds of its corresponding dimension.
+        for (axis, (&idx, &dim)) in indices.iter().zip(self.shape.as_slice()).enumerate() {
+            if idx >= dim {
+                return Err(crate::Error::IndexOutOfBounds { axis, index: idx, dim });
+            }
+        }
+
+        let flat = indices
             .iter()
             .zip(&self.strides)
-            .fold(0usize, |acc, (idx, stride)| acc + idx * stride)
+            .fold(0usize, |acc, (idx, stride)| acc + idx * stride);
+
+        Ok(flat)
     }
 
-    pub fn unravel_index(&self, index: usize) -> Vec<usize> {
+    /// Convert a flat (raveled) index into multi-dimensional indices.
+    ///
+    /// Returns an error if the flat index is out of range for the tensor size.
+    pub fn unravel_index(&self, index: usize) -> Result<Vec<usize>> {
         if self.shape.is_empty() {
-            return vec![];
+            return Ok(vec![]);
+        }
+
+        let total = self.shape.size();
+        if index >= total {
+            return Err(crate::Error::LinearIndexOutOfRange { index, size: total });
         }
 
         let mut indices = vec![0; self.shape.len()];
@@ -56,7 +81,7 @@ impl TensorLayout {
             remainder %= self.strides[i];
         }
 
-        indices
+        Ok(indices)
     }
 
     /// Permute the dimensions of the tensor layout according to the given
@@ -114,13 +139,15 @@ impl TensorLayout {
         })
     }
 
-    pub fn merge(&self, dim_range: RangeInclusive<usize>) -> Self {
+    /// Merge a contiguous inclusive range of dimensions into a single dimension.
+    /// Returns an error if the range is invalid.
+    pub fn merge(&self, dim_range: RangeInclusive<usize>) -> Result<Self> {
         let (start, end) = (*dim_range.start(), *dim_range.end());
+        let rank = self.shape.len();
 
-        assert!(
-            start <= end && end < self.shape.len(),
-            "Invalid dimension range for merge."
-        );
+        if !(start <= end && end < rank) {
+            return Err(crate::Error::InvalidMergeRange { start, end, rank });
+        }
 
         // Compute the merged size by multiplying the sizes in the inclusive range.
         let merged_size = self.shape.as_slice()[start..=end].iter().product();
@@ -137,10 +164,10 @@ impl TensorLayout {
         new_strides.push(merged_stride);
         new_strides.extend_from_slice(&self.strides[end + 1..]);
 
-        Self {
+        Ok(Self {
             shape:   TensorShape::new(new_shape),
             strides: new_strides,
-        }
+        })
     }
 }
 
@@ -198,11 +225,17 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Indices length does not match tensorshape dimensions.")]
     fn ravel_index_shape_mismatch() {
         let layout = TensorLayout::new(vec![2, 3, 4]);
         let indices = vec![1, 2]; // Incorrect length
-        layout.ravel_index(&indices);
+        let err = layout.ravel_index(&indices).unwrap_err();
+        match err {
+            crate::Error::RankMismatch { expected, got } => {
+                assert_eq!(expected, 3);
+                assert_eq!(got, 2);
+            }
+            _ => panic!("unexpected error variant"),
+        }
     }
 
     #[test]
@@ -210,7 +243,7 @@ mod tests {
         let layout = TensorLayout::new(vec![2, 3, 4]);
         let indices = vec![1, 2, 3];
         let expected_index = 1 * 12 + 2 * 4 + 3;
-        let computed_index = layout.ravel_index(&indices);
+        let computed_index = layout.ravel_index(&indices).unwrap();
         assert_eq!(computed_index, expected_index);
     }
 
@@ -219,8 +252,22 @@ mod tests {
         let layout = TensorLayout::new(vec![]);
         let index = 0;
         let expected_indices: Vec<usize> = vec![];
-        let computed_indices = layout.unravel_index(index);
+        let computed_indices = layout.unravel_index(index).unwrap();
         assert_eq!(computed_indices, expected_indices);
+    }
+
+    #[test]
+    fn unravel_index_out_of_range() {
+        let layout = TensorLayout::new(vec![2, 3, 4]);
+        let index = 24; // size is 24, so 24 is out of range
+        let err = layout.unravel_index(index).unwrap_err();
+        match err {
+            crate::Error::LinearIndexOutOfRange { index: idx, size } => {
+                assert_eq!(idx, 24);
+                assert_eq!(size, 24);
+            }
+            _ => panic!("unexpected error variant"),
+        }
     }
 
     #[test]
@@ -228,7 +275,29 @@ mod tests {
         let layout = TensorLayout::new(vec![2, 3, 4]);
         let index = 23;
         let expected_indices = vec![1, 2, 3];
-        let computed_indices = layout.unravel_index(index);
+        let computed_indices = layout.unravel_index(index).unwrap();
         assert_eq!(computed_indices, expected_indices);
+    }
+
+    #[test]
+    fn merge_invalid_range() {
+        let layout = TensorLayout::new(vec![2, 3, 4]);
+        let res = layout.merge(2..=1).unwrap_err();
+        match res {
+            crate::Error::InvalidMergeRange { start, end, rank } => {
+                assert_eq!(start, 2);
+                assert_eq!(end, 1);
+                assert_eq!(rank, 3);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn merge_success() {
+        let layout = TensorLayout::new(vec![2, 3, 4, 5]);
+        // merge axes 1..=2 -> shape becomes [2, 12, 5]
+        let merged = layout.merge(1..=2).unwrap();
+        assert_eq!(merged.shape().as_slice(), &[2, 12, 5]);
     }
 }
