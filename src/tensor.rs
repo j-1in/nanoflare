@@ -2,9 +2,10 @@ use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
+use crate::Result;
 use std::{
     fmt::Debug,
-    ops::{Add, Div, Index, Mul, Sub},
+    ops::{Add, Div, Index, Mul, RangeInclusive, Sub},
     sync::Arc,
 };
 
@@ -61,6 +62,29 @@ impl<T: DType> Tensor<T> {
 
     pub fn layout(&self) -> &TensorLayout {
         &self.layout
+    }
+
+    // TODO: avoid unnecessary clone
+    pub fn permute(&self, permuted_indices: &[usize]) -> Result<Self> {
+        let layout = self.layout.permute(permuted_indices)?;
+
+        Ok(Tensor {
+            layout,
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
+            requires_grad: self.requires_grad.clone(),
+            grad: self.grad.clone(),
+        })
+    }
+
+    pub fn merge(&self, dim_range: RangeInclusive<usize>) -> Self {
+        Tensor {
+            layout:        self.layout.merge(dim_range),
+            storage:       self.storage.clone(),
+            backend:       self.backend.clone(),
+            requires_grad: self.requires_grad.clone(),
+            grad:          self.grad.clone(),
+        }
     }
 }
 
