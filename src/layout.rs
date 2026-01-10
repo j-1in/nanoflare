@@ -6,6 +6,7 @@ use std::ops::{Index, RangeInclusive, RangeTo};
 pub struct TensorLayout {
     shape:   TensorShape,
     strides: Vec<usize>,
+    offset:  usize,
 }
 
 impl TensorLayout {
@@ -19,6 +20,7 @@ impl TensorLayout {
         TensorLayout {
             shape: TensorShape::new(shape),
             strides,
+            offset: 0,
         }
     }
 
@@ -57,7 +59,9 @@ impl TensorLayout {
             .zip(&self.strides)
             .fold(0usize, |acc, (idx, stride)| acc + idx * stride);
 
-        Ok(flat)
+        // Include any layout offset so the returned linear index refers to the
+        // underlying buffer position.
+        Ok(self.offset + flat)
     }
 
     /// Convert a flat (raveled) index into multi-dimensional indices.
@@ -69,12 +73,14 @@ impl TensorLayout {
         }
 
         let total = self.shape.size();
-        if index >= total {
+        // The provided `index` is expected to be an index into the underlying
+        // buffer; it must fall within the window described by `offset .. offset + total`.
+        if index < self.offset || index >= self.offset + total {
             return Err(Error::LinearIndexOutOfRange { index, size: total });
         }
 
         let mut indices = vec![0; self.shape.len()];
-        let mut remainder = index;
+        let mut remainder = index - self.offset;
 
         for i in 0..self.shape.len() {
             indices[i] = remainder / self.strides[i];
@@ -136,6 +142,7 @@ impl TensorLayout {
         Ok(Self {
             shape: TensorShape::new(shape),
             strides,
+            offset: self.offset,
         })
     }
 
@@ -176,6 +183,7 @@ impl TensorLayout {
         Ok(Self {
             shape:   TensorShape::new(new_shape),
             strides: new_strides,
+            offset:  self.offset,
         })
     }
 
@@ -289,12 +297,160 @@ impl TensorLayout {
         Ok(Self {
             shape:   TensorShape::new(new_shape),
             strides: new_strides,
+            offset:  self.offset,
         })
     }
 
-    // pub fn reshape(&self, shape: &[usize]) -> Result<Self> {
+    pub fn is_contiguous(&self) -> bool {
+        let mut expected_stride = 1;
+        for (&dim, &stride) in self
+            .shape
+            .as_slice()
+            .iter()
+            .rev()
+            .zip(self.strides.iter().rev())
+        {
+            if dim == 0 {
+                continue; // Skip zero-sized dimensions
+            }
+            if stride != expected_stride {
+                return false;
+            }
+            expected_stride *= dim;
+        }
+        true
+    }
 
-    // }
+    /// Reshape the tensor layout to a new shape.
+    ///
+    /// The total number of elements must remain the same. This operation only
+    /// changes the logical shape and recomputes canonical (C-contiguous)
+    /// strides for the new shape; it does not modify the underlying memory or
+    /// attempt to preserve non-contiguous memory layouts. The current `offset`
+    /// is preserved.
+    ///
+    /// # Arguments
+    /// * `shape` - Any type implementing `AsRef<[usize]>` describing the new
+    ///   shape. The product of the new dimensions must equal the current
+    ///   tensor size.
+    ///
+    /// # Returns
+    /// A new `TensorLayout` with the requested shape and newly computed
+    /// contiguous strides.
+    ///
+    /// # Errors
+    /// Returns `Error::TensorSizeMismatch` if the requested shape contains a
+    /// different number of elements than the current layout.
+    pub fn reshape(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
+        let shape = shape.as_ref();
+
+        if shape.iter().product::<usize>() != self.shape().size() {
+            return Err(Error::TensorSizeMismatch {
+                expected: self.shape().as_slice().to_vec(),
+                got:      shape.to_vec(),
+            });
+        }
+
+        Ok(Self {
+            shape:   TensorShape::new(shape.to_vec()),
+            strides: Self::compute_stride(shape),
+            offset:  self.offset,
+        })
+    }
+
+    /// Slice the tensor along a single dimension, producing a sub-layout.
+    ///
+    /// This operation does not copy memory; it adjusts the shape and offset so
+    /// that the returned layout describes a view into the original tensor.
+    /// Strides are preserved so indexing into the returned layout maps to the
+    /// correct positions in the original buffer.
+    ///
+    /// # Arguments
+    /// * `dim` - The axis to slice.
+    /// * `range` - An inclusive range [start..=end] specifying the slice along
+    ///   the chosen axis. Both `start` and `end` must be within the bounds of
+    ///   that axis and `start` must be <= `end`.
+    ///
+    /// # Returns
+    /// A new `TensorLayout` describing the sliced view. The `offset` is moved
+    /// forward by `start * stride[dim]` and the size of the sliced axis is set
+    /// to `end - start + 1`.
+    ///
+    /// # Errors
+    /// Returns `Error::AxisOutOfBounds` if `dim` is not a valid axis, or
+    /// `Error::IndexOutOfBounds` if the provided range is invalid for the
+    /// selected axis.
+    pub fn slice(&self, dim: usize, range: RangeInclusive<usize>) -> Result<Self> {
+        if dim >= self.shape.len() {
+            return Err(Error::AxisOutOfBounds { axis: dim, rank: self.shape.len() });
+        }
+
+        let (start, end) = (*range.start(), *range.end());
+        let dim_size = self.shape[dim];
+
+        if !(start <= end && end < dim_size) {
+            return Err(Error::IndexOutOfBounds {
+                axis:  dim,
+                index: end,
+                dim:   dim_size,
+            });
+        }
+
+        let mut new_shape = self.shape.as_slice().to_vec();
+        new_shape[dim] = end - start + 1;
+
+        let additional_offset = start * self.strides[dim];
+
+        Ok(Self {
+            shape:   TensorShape::new(new_shape),
+            strides: self.strides.clone(),
+            offset:  self.offset + additional_offset,
+        })
+    }
+
+    /// Create a strided view by skipping elements along a single axis.
+    ///
+    /// This returns a new layout where `stride[dim]` is multiplied by `step`,
+    /// effectively taking every `step`-th element along the given axis. The
+    /// length of that axis is rounded up using integer ceiling so the view
+    /// covers all remaining elements when the axis length is not a multiple of
+    /// `step`.
+    ///
+    /// This operation does not reallocate or copy data; it only modifies the
+    /// logical strides and shape and preserves the existing `offset`.
+    ///
+    /// # Arguments
+    /// * `dim` - The axis to apply skipping on.
+    /// * `step` - The stride multiplier (must be >= 1). A `step` of 1 returns
+    ///   an identical layout.
+    ///
+    /// # Returns
+    /// A new `TensorLayout` representing the strided view.
+    ///
+    /// # Errors
+    /// Returns `Error::AxisOutOfBounds` if `dim` is invalid or
+    /// `Error::InvalidSkipStep` if `step` is zero.
+    pub fn skip(&self, dim: usize, step: usize) -> Result<Self> {
+        if dim >= self.shape.len() {
+            return Err(Error::AxisOutOfBounds { axis: dim, rank: self.shape.len() });
+        }
+
+        if step == 0 {
+            return Err(Error::InvalidSkipStep { step });
+        }
+
+        let mut new_strides = self.strides.clone();
+        new_strides[dim] *= step;
+
+        let mut new_shape = self.shape.clone();
+        new_shape.0[dim] = new_shape.0[dim].div_ceil(step);
+
+        Ok(Self {
+            shape:   new_shape,
+            strides: new_strides,
+            offset:  self.offset,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -533,5 +689,172 @@ mod tests {
         // also check unravel round-trip for split layout
         let unr = split.unravel_index(split_flat).unwrap();
         assert_eq!(unr, split_idx);
+    }
+
+    // New tests for reshape, slice, and skip
+
+    #[test]
+    fn reshape_preserves_size_and_recomputes_strides() {
+        let layout = TensorLayout::new(vec![2, 3, 4]); // size 24
+        let reshaped = layout.reshape(&[4, 6]).unwrap();
+        assert_eq!(reshaped.shape().as_slice(), &[4, 6]);
+        // reshaped should be canonical (contiguous)
+        assert!(reshaped.is_contiguous());
+    }
+
+    #[test]
+    fn reshape_ravel_unravel_consistency() {
+        let layout = TensorLayout::new(vec![2, 3, 4]);
+        let reshaped = layout.reshape(&[4, 6]).unwrap();
+
+        // Verify ravel/unravel consistency using canonical strides
+        let expected_strides = TensorLayout::compute_stride(reshaped.shape().as_slice());
+        let idx = vec![3, 5];
+        let expected_flat: usize = idx
+            .iter()
+            .zip(expected_strides.iter())
+            .fold(0usize, |acc, (i, s)| acc + i * s);
+        assert_eq!(reshaped.ravel_index(&idx).unwrap(), expected_flat);
+        assert_eq!(reshaped.unravel_index(expected_flat).unwrap(), idx);
+    }
+
+    #[test]
+    fn reshape_size_mismatch_error() {
+        let layout = TensorLayout::new(vec![2, 3, 4]);
+        let err = layout.reshape(&[5, 5]).unwrap_err();
+        match err {
+            Error::TensorSizeMismatch { expected, got } => {
+                assert_eq!(expected, vec![2, 3, 4]);
+                assert_eq!(got, vec![5, 5]);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn reshape_from_noncontiguous_layout_returns_contiguous_strides() {
+        let layout = TensorLayout::new(vec![2, 3, 4]);
+        let permuted = layout.permute(&[2, 1, 0]).unwrap();
+        assert!(!permuted.is_contiguous());
+        // reshape will recompute canonical strides, ignoring non-contiguity
+        let reshaped = permuted.reshape(&[4, 6]).unwrap();
+        assert!(reshaped.is_contiguous());
+    }
+
+    #[test]
+    fn slice_axis_out_of_bounds() {
+        let layout = TensorLayout::new(vec![4, 5, 6]);
+        let err = layout.slice(3, 0..=1).unwrap_err();
+        match err {
+            Error::AxisOutOfBounds { axis, rank } => {
+                assert_eq!(axis, 3);
+                assert_eq!(rank, 3);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn slice_invalid_range() {
+        let layout = TensorLayout::new(vec![4, 5, 6]);
+        let err = layout.slice(1, 2..=5).unwrap_err();
+        match err {
+            Error::IndexOutOfBounds { axis, index, dim } => {
+                assert_eq!(axis, 1);
+                assert_eq!(index, 5);
+                assert_eq!(dim, 5);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn slice_valid_shape_and_offset_preserved() {
+        let layout = TensorLayout::new(vec![4, 5, 6]);
+        let s = layout.slice(1, 1..=3).unwrap();
+        assert_eq!(s.shape().as_slice(), &[4, 3, 6]);
+        // strides preserved
+        assert_eq!(s.strides, layout.strides);
+        // offset advanced by start * stride[1]
+        assert_eq!(s.offset, layout.offset + 1 * layout.strides[1]);
+    }
+
+    #[test]
+    fn slice_ravel_unravel_consistency() {
+        let layout = TensorLayout::new(vec![4, 5, 6]);
+        let s = layout.slice(1, 1..=3).unwrap();
+        let idx = vec![2, 1, 5]; // within [4,3,6]
+        let sliced_flat = s.ravel_index(&idx).unwrap();
+        // corresponding original index: second axis needs offset by start
+        let orig_idx = vec![2, 1 + 1, 5];
+        let orig_flat = layout.ravel_index(&orig_idx).unwrap();
+        assert_eq!(sliced_flat, orig_flat);
+    }
+
+    #[test]
+    fn skip_axis_out_of_bounds_error() {
+        let layout = TensorLayout::new(vec![3, 6]);
+        let err = layout.skip(2, 2).unwrap_err();
+        match err {
+            Error::AxisOutOfBounds { axis, rank } => {
+                assert_eq!(axis, 2);
+                assert_eq!(rank, 2);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn skip_invalid_step_error() {
+        let layout = TensorLayout::new(vec![3, 6]);
+        let err = layout.skip(1, 0).unwrap_err();
+        match err {
+            Error::InvalidSkipStep { step } => {
+                assert_eq!(step, 0);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn skip_step_one_returns_identical() {
+        let layout = TensorLayout::new(vec![3, 6]);
+        let same = layout.skip(0, 1).unwrap();
+        assert_eq!(same, layout);
+    }
+
+    #[test]
+    fn skip_shape_and_stride_changes() {
+        let layout = TensorLayout::new(vec![3, 6]);
+        let skipped = layout.skip(1, 2).unwrap();
+        // axis length: ceil(6/2)=3
+        assert_eq!(skipped.shape().as_slice(), &[3, 3]);
+        // strides: original stride[1] * 2
+        assert_eq!(skipped.strides[1], layout.strides[1] * 2);
+    }
+
+    #[test]
+    fn skip_ravel_mapping_consistency() {
+        let layout = TensorLayout::new(vec![3, 6]);
+        let skipped = layout.skip(1, 2).unwrap();
+        // ravel mapping: an index (a,b) in skipped layout corresponds to (a, b*2) in original
+        let a = 2usize;
+        let b = 2usize; // in skipped axis range [0..3)
+        let skipped_idx = vec![a, b];
+        let skipped_flat = skipped.ravel_index(&skipped_idx).unwrap();
+        let orig_idx = vec![a, b * 2];
+        let orig_flat = layout.ravel_index(&orig_idx).unwrap();
+        assert_eq!(skipped_flat, orig_flat);
+    }
+
+    #[test]
+    fn skip_rounding_behavior_last_element_maps() {
+        let l = TensorLayout::new(vec![5]);
+        let sk = l.skip(0, 2).unwrap();
+        assert_eq!(sk.shape().as_slice(), &[3]);
+        // last element maps to original index 4
+        let last_flat = sk.ravel_index(&[2usize]).unwrap();
+        let orig_last_flat = l.ravel_index(&[4usize]).unwrap();
+        assert_eq!(last_flat, orig_last_flat);
     }
 }

@@ -32,6 +32,13 @@ pub enum Error {
         original_size: usize,
         shape:         Vec<usize>,
     },
+    TensorSizeMismatch {
+        expected: Vec<usize>,
+        got:      Vec<usize>,
+    },
+    InvalidSkipStep {
+        step: usize,
+    },
 }
 
 impl fmt::Display for Error {
@@ -72,6 +79,12 @@ impl fmt::Display for Error {
                     "Cannot split dimension of size {} into sizes {:?}",
                     original_size, shape
                 )
+            }
+            Error::TensorSizeMismatch { expected, got } => {
+                write!(f, "expected tensor size {:?}, got {:?}", expected, got)
+            }
+            Error::InvalidSkipStep { step } => {
+                write!(f, "invalid skip step of {}", step)
             }
         }
     }
