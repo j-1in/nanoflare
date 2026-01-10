@@ -2,12 +2,36 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum Error {
-    RankMismatch { expected: usize, got: usize },
-    AxisOutOfBounds { axis: usize, rank: usize },
-    DuplicateAxis { axis: usize },
-    IndexOutOfBounds { axis: usize, index: usize, dim: usize },
-    LinearIndexOutOfRange { index: usize, size: usize },
-    InvalidMergeRange { start: usize, end: usize, rank: usize },
+    RankMismatch {
+        expected: usize,
+        got:      usize,
+    },
+    AxisOutOfBounds {
+        axis: usize,
+        rank: usize,
+    },
+    DuplicateAxis {
+        axis: usize,
+    },
+    IndexOutOfBounds {
+        axis:  usize,
+        index: usize,
+        dim:   usize,
+    },
+    LinearIndexOutOfRange {
+        index: usize,
+        size:  usize,
+    },
+    InvalidMergeRange {
+        start: usize,
+        end:   usize,
+        rank:  usize,
+    },
+    TooManySplitWildcards,
+    InvalidDimensionSplit {
+        original_size: usize,
+        shape:         Vec<usize>,
+    },
 }
 
 impl fmt::Display for Error {
@@ -37,6 +61,16 @@ impl fmt::Display for Error {
                     f,
                     "invalid merge range {}..={} for tensor of rank {}",
                     start, end, rank
+                )
+            }
+            Error::TooManySplitWildcards => {
+                write!(f, "Cannot have more than one wildcard (0) in split sizes")
+            }
+            Error::InvalidDimensionSplit { original_size, shape } => {
+                write!(
+                    f,
+                    "Cannot split dimension of size {} into sizes {:?}",
+                    original_size, shape
                 )
             }
         }

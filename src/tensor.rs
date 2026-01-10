@@ -88,6 +88,18 @@ impl<T: DType> Tensor<T> {
             grad: self.grad.clone(),
         })
     }
+
+    pub fn split(&self, dim: usize, shape: impl AsRef<[usize]>) -> Result<Self> {
+        let layout = self.layout.split(dim, shape)?;
+
+        Ok(Tensor {
+            layout,
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
+            requires_grad: self.requires_grad.clone(),
+            grad: self.grad.clone(),
+        })
+    }
 }
 
 impl<T: DType> Index<&[usize]> for Tensor<T> {
