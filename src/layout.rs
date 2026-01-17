@@ -1,6 +1,7 @@
-use crate::{Error, Result};
 use std::fmt::Debug;
 use std::ops::{Index, RangeInclusive, RangeTo};
+
+use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TensorLayout {
@@ -74,7 +75,8 @@ impl TensorLayout {
 
         let total = self.shape.size();
         // The provided `index` is expected to be an index into the underlying
-        // buffer; it must fall within the window described by `offset .. offset + total`.
+        // buffer; it must fall within the window described by `offset .. offset +
+        // total`.
         if index < self.offset || index >= self.offset + total {
             return Err(Error::LinearIndexOutOfRange { index, size: total });
         }
@@ -331,8 +333,8 @@ impl TensorLayout {
     ///
     /// # Arguments
     /// * `shape` - Any type implementing `AsRef<[usize]>` describing the new
-    ///   shape. The product of the new dimensions must equal the current
-    ///   tensor size.
+    ///   shape. The product of the new dimensions must equal the current tensor
+    ///   size.
     ///
     /// # Returns
     /// A new `TensorLayout` with the requested shape and newly computed
@@ -837,7 +839,8 @@ mod tests {
     fn skip_ravel_mapping_consistency() {
         let layout = TensorLayout::new(vec![3, 6]);
         let skipped = layout.skip(1, 2).unwrap();
-        // ravel mapping: an index (a,b) in skipped layout corresponds to (a, b*2) in original
+        // ravel mapping: an index (a,b) in skipped layout corresponds to (a, b*2) in
+        // original
         let a = 2usize;
         let b = 2usize; // in skipped axis range [0..3)
         let skipped_idx = vec![a, b];

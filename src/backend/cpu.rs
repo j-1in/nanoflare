@@ -1,9 +1,11 @@
+use std::fmt::Debug;
+use std::sync::Arc;
+
 use super::Backend;
+use crate::dtype::DType;
 use crate::layout::TensorLayout;
-use crate::storage::TensorStorage;
+use crate::storage::{CpuStorage, TensorStorage};
 use crate::tensor::Tensor;
-use crate::{dtype::DType, storage::CpuStorage};
-use std::{fmt::Debug, sync::Arc};
 
 #[derive(Debug)]
 struct CpuBackend;
@@ -32,28 +34,27 @@ impl<T: DType> Backend<T> for CpuBackend {
     fn from_vec(&self, data: Vec<T>) -> TensorStorage<T> {
         todo!()
     }
-
-    fn add(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn sub(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn mul(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn div(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn matmul(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         todo!()
     }
 }
@@ -67,7 +68,7 @@ mod tests {
         // FIXME
         let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
         let layout = TensorLayout::new(vec![2, 2]);
-        let a = Tensor::<u32>::zeros(layout.clone(), backend.clone());
+        let a = Tensor::<u32, CpuBackend>::zeros(layout.clone(), backend.clone());
         let b = Tensor::zeros(layout.clone(), backend.clone());
         let c = &a + &b;
 

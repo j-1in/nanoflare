@@ -1,14 +1,13 @@
 #![allow(dead_code, unused)]
 
+use std::fmt::Debug;
+use std::sync::{Arc, RwLock};
+
 use super::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::{CudaStorage, TensorStorage};
 use crate::tensor::Tensor;
-use std::{
-    fmt::Debug,
-    sync::{Arc, RwLock},
-};
 
 #[derive(Debug)]
 struct CudaBackend;
@@ -26,23 +25,23 @@ impl<T: DType> Backend<T> for CudaBackend {
         unimplemented!()
     }
 
-    fn add(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         unimplemented!()
     }
 
-    fn sub(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         unimplemented!()
     }
 
-    fn mul(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         unimplemented!()
     }
 
-    fn div(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         unimplemented!()
     }
 
-    fn matmul(&self, a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T> {
+    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
         unimplemented!()
     }
 }

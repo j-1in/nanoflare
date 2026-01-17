@@ -1,9 +1,8 @@
+use std::fmt::Debug;
+use std::ops::{Index, IndexMut};
+use std::sync::Arc;
+
 use crate::dtype::DType;
-use std::{
-    fmt::Debug,
-    ops::{Index, IndexMut},
-    sync::Arc,
-};
 
 #[derive(Debug, Clone)]
 pub enum TensorStorage<T: DType> {

@@ -1,19 +1,18 @@
+use std::fmt::Debug;
+use std::ops::{Add, Div, Index, Mul, RangeInclusive, Sub};
+use std::sync::Arc;
+
+use crate::Result;
 use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
-use crate::Result;
-use std::{
-    fmt::Debug,
-    ops::{Add, Div, Index, Mul, RangeInclusive, Sub},
-    sync::Arc,
-};
 
 macro_rules! impl_binary_op {
     ($($trait:ident, $method:ident);* $(;)?) => {
         $(
             // 1. Owned implementation: a + b
-            impl<T: DType> $trait for Tensor<T> {
+            impl<T:DType, B: Backend<T>> $trait for Tensor<T, B> {
                 type Output = Self;
                 fn $method(self, rhs: Self) -> Self::Output {
                     self.backend.$method(&self, &rhs)
@@ -21,9 +20,9 @@ macro_rules! impl_binary_op {
             }
 
             // 2. Reference implementation: &a + &b
-            impl<'a, 'b, T: DType> $trait<&'b Tensor<T>> for &'a Tensor<T> {
-                type Output = Tensor<T>;
-                fn $method(self, rhs: &'b Tensor<T>) -> Self::Output {
+            impl<'a, 'b, T:DType, B: Backend<T>> $trait<&'b Tensor<T, B>> for &'a Tensor<T, B> {
+                type Output = Tensor<T, B>;
+                fn $method(self, rhs: &'b Tensor<T, B>) -> Self::Output {
                     self.backend.$method(self, rhs)
                 }
             }
@@ -32,12 +31,11 @@ macro_rules! impl_binary_op {
 }
 
 #[derive(Debug, Clone)]
-pub struct Tensor<T: DType> {
+pub struct Tensor<T: DType, B: Backend<T>> {
     storage:       TensorStorage<T>,
     layout:        TensorLayout,
-    backend:       Arc<dyn Backend<T>>,
+    backend:       Arc<B>,
     requires_grad: bool,
-    grad:          Option<Box<Tensor<T>>>,
 }
 
 impl_binary_op!(
@@ -47,10 +45,10 @@ impl_binary_op!(
     Div, div
 );
 
-impl<T: DType> Tensor<T> {
+impl<T: DType, B: Backend<T>> Tensor<T, B> {
     /// Create a new tensor filled with zeros, given a specific layout and
     /// backend.
-    pub fn zeros(layout: TensorLayout, backend: Arc<dyn Backend<T>>) -> Self {
+    pub fn zeros(layout: TensorLayout, backend: Arc<B>) -> Self {
         let storage = backend.store_zeros(&layout);
 
         Tensor {
@@ -58,7 +56,6 @@ impl<T: DType> Tensor<T> {
             layout,
             backend,
             requires_grad: false,
-            grad: None,
         }
     }
 
@@ -81,7 +78,6 @@ impl<T: DType> Tensor<T> {
             storage: self.storage.clone(),
             backend: self.backend.clone(),
             requires_grad: self.requires_grad.clone(),
-            grad: self.grad.clone(),
         })
     }
 
@@ -97,7 +93,6 @@ impl<T: DType> Tensor<T> {
             storage: self.storage.clone(),
             backend: self.backend.clone(),
             requires_grad: self.requires_grad.clone(),
-            grad: self.grad.clone(),
         })
     }
 
@@ -113,7 +108,6 @@ impl<T: DType> Tensor<T> {
             storage: self.storage.clone(),
             backend: self.backend.clone(),
             requires_grad: self.requires_grad.clone(),
-            grad: self.grad.clone(),
         })
     }
 
@@ -129,7 +123,6 @@ impl<T: DType> Tensor<T> {
                 storage: self.storage.clone(),
                 backend: self.backend.clone(),
                 requires_grad: self.requires_grad.clone(),
-                grad: self.grad.clone(),
             })
         } else {
             todo!("non-contiguous reshape not implemented yet")
@@ -148,7 +141,6 @@ impl<T: DType> Tensor<T> {
             storage: self.storage.clone(),
             backend: self.backend.clone(),
             requires_grad: self.requires_grad.clone(),
-            grad: self.grad.clone(),
         })
     }
 
@@ -164,12 +156,11 @@ impl<T: DType> Tensor<T> {
             storage: self.storage.clone(),
             backend: self.backend.clone(),
             requires_grad: self.requires_grad.clone(),
-            grad: self.grad.clone(),
         })
     }
 }
 
-impl<T: DType> Index<&[usize]> for Tensor<T> {
+impl<T: DType, B: Backend<T>> Index<&[usize]> for Tensor<T, B> {
     type Output = T;
 
     fn index(&self, indices: &[usize]) -> &Self::Output {

@@ -1,5 +1,6 @@
-use num_traits::{One, Zero};
 use std::fmt::Debug;
+
+use num_traits::{One, Zero};
 
 pub trait DType: Debug + Copy + Clone + PartialEq + Zero + One {}
 
