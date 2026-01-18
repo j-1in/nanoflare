@@ -21,6 +21,17 @@ impl<T: DType> Index<usize> for TensorStorage<T> {
     }
 }
 
+impl<T: DType> IndexMut<usize> for TensorStorage<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match self {
+            TensorStorage::Cpu(storage) => &mut Arc::get_mut(storage)
+                .expect("Cannot get mutable reference to CpuStorage inside Arc")[index],
+            TensorStorage::Cuda(storage) => &mut Arc::get_mut(storage)
+                .expect("Cannot get mutable reference to CudaStorage inside Arc")[index],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CpuStorage<T: DType>(Vec<T>);
 

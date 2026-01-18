@@ -2,13 +2,14 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::Backend;
+use crate::Result;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::{CpuStorage, TensorStorage};
 use crate::tensor::Tensor;
 
-#[derive(Debug)]
-struct CpuBackend;
+#[derive(Debug, Clone)]
+pub struct CpuBackend;
 
 impl CpuBackend {
     pub fn new() -> Self {
@@ -34,27 +35,38 @@ impl<T: DType> Backend<T> for CpuBackend {
     fn from_vec(&self, data: Vec<T>) -> TensorStorage<T> {
         todo!()
     }
-    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+        self.validate_same_layout(a, b);
+
+        let mut res = self.store_zeros(a.layout());
+        for i in 0..a.layout().shape().size() {
+            let _sum = a.storage()[i] + b.storage()[i];
+            res[i] = _sum;
+        }
+
+        Ok(Tensor::from_parts(
+            res,
+            a.layout().clone(),
+            a.backend().clone(),
+        ))
+    }
+
+    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         self.validate_same_layout(a, b);
         todo!()
     }
 
-    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
-        self.validate_same_layout(a, b);
-        todo!()
-    }
-
-    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         todo!()
     }
 }
@@ -65,12 +77,11 @@ mod tests {
 
     #[test]
     fn tensor_addition() {
-        // FIXME
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let layout = TensorLayout::new(vec![2, 2]);
         let a = Tensor::<u32, CpuBackend>::zeros(layout.clone(), backend.clone());
         let b = Tensor::zeros(layout.clone(), backend.clone());
-        let c = &a + &b;
+        let c = (&a + &b).unwrap();
 
         assert_eq!(c.layout(), &layout);
     }

@@ -4,13 +4,14 @@ use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 
 use super::Backend;
+use crate::Result;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::{CudaStorage, TensorStorage};
 use crate::tensor::Tensor;
 
-#[derive(Debug)]
-struct CudaBackend;
+#[derive(Debug, Clone)]
+pub struct CudaBackend;
 
 impl<T: DType> Backend<T> for CudaBackend {
     fn store_zeros(&self, layout: &TensorLayout) -> TensorStorage<T> {
@@ -25,23 +26,23 @@ impl<T: DType> Backend<T> for CudaBackend {
         unimplemented!()
     }
 
-    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         unimplemented!()
     }
 
-    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         unimplemented!()
     }
 
-    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         unimplemented!()
     }
 
-    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         unimplemented!()
     }
 
-    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Tensor<T, B> {
+    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
         unimplemented!()
     }
 }

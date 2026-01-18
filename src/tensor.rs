@@ -1,29 +1,31 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Add, Div, Index, Mul, RangeInclusive, Sub};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::Result;
+use crate::autograd::{Node, NodeId, OpType, Tape};
 use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 
 macro_rules! impl_binary_op {
-    ($($trait:ident, $method:ident);* $(;)?) => {
+    ($($trait:ident, $method:ident, $op:expr);* $(;)?) => {
         $(
             // 1. Owned implementation: a + b
             impl<T:DType, B: Backend<T>> $trait for Tensor<T, B> {
-                type Output = Self;
+                type Output = Result<Self>;
                 fn $method(self, rhs: Self) -> Self::Output {
-                    self.backend.$method(&self, &rhs)
+                    self.binary_op(&rhs, $op, |backend, a, b| backend.$method(a, b))
                 }
             }
 
             // 2. Reference implementation: &a + &b
             impl<'a, 'b, T:DType, B: Backend<T>> $trait<&'b Tensor<T, B>> for &'a Tensor<T, B> {
-                type Output = Tensor<T, B>;
+                type Output = Result<Tensor<T, B>>;
                 fn $method(self, rhs: &'b Tensor<T, B>) -> Self::Output {
-                    self.backend.$method(self, rhs)
+                    self.binary_op(rhs, $op, |backend, a, b| backend.$method(a,b))
                 }
             }
         )*
@@ -36,13 +38,16 @@ pub struct Tensor<T: DType, B: Backend<T>> {
     layout:        TensorLayout,
     backend:       Arc<B>,
     requires_grad: bool,
+    tape:          Option<Arc<Tape<T>>>,
+    node_id:       Option<NodeId>,
+    grad:          Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
 }
 
 impl_binary_op!(
-    Add, add;
-    Sub, sub;
-    Mul, mul;
-    Div, div
+    Add, add, OpType::Add;
+    Sub, sub, OpType::Sub;
+    Mul, mul, OpType::Mul;
+    Div, div, OpType::Div;
 );
 
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
@@ -56,12 +61,258 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             backend,
             requires_grad: false,
+            tape: None,
+            node_id: None,
+            grad: None,
         }
+    }
+
+    /// Create a new tensor filled with ones, given a specific layout and
+    /// backend.
+    pub fn ones(layout: TensorLayout, backend: Arc<B>) -> Self {
+        let storage = backend.store_ones(&layout);
+
+        Tensor {
+            storage,
+            layout,
+            backend,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
+            grad: None,
+        }
+    }
+
+    pub fn requires_grad(mut self, tape: Arc<Tape<T>>) -> Self {
+        let grad_slot = Arc::new(Mutex::new(None));
+        let node_id = tape.add_node(Node {
+            op:            OpType::Leaf,
+            parents:       Vec::new(),
+            requires_grad: true,
+            layout:        self.layout.clone(),
+            value:         self.storage.clone(),
+            grad_slot:     Some(grad_slot.clone()),
+        });
+
+        self.requires_grad = true;
+        self.tape = Some(tape);
+        self.node_id = Some(node_id);
+        self.grad = Some(grad_slot);
+        self
     }
 
     /// Get a reference to the tensor's layout.
     pub fn layout(&self) -> &TensorLayout {
         &self.layout
+    }
+
+    /// Get a reference to the tensor's storage.
+    pub fn storage(&self) -> &TensorStorage<T> {
+        &self.storage
+    }
+
+    /// Get a reference to the tensor's backend.
+    pub fn backend(&self) -> &Arc<B> {
+        &self.backend
+    }
+
+    pub fn from_parts(storage: TensorStorage<T>, layout: TensorLayout, backend: Arc<B>) -> Self {
+        Tensor {
+            storage,
+            layout,
+            backend,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
+            grad: None,
+        }
+    }
+
+    fn binary_op<F>(&self, rhs: &Tensor<T, B>, op: OpType, f: F) -> Result<Self>
+    where
+        F: FnOnce(&B, &Tensor<T, B>, &Tensor<T, B>) -> Result<Tensor<T, B>>,
+    {
+        let mut out = f(&self.backend, self, rhs)?;
+
+        let needs_grad = self.requires_grad || rhs.requires_grad;
+        out.requires_grad = needs_grad;
+
+        if !needs_grad {
+            return Ok(out);
+        }
+
+        let tape = match (&self.tape, &rhs.tape) {
+            (Some(left), Some(right)) if Arc::ptr_eq(left, right) => Some(left.clone()),
+            (Some(left), None) => Some(left.clone()),
+            (None, Some(right)) => Some(right.clone()),
+            _ => None,
+        };
+
+        if let Some(tape) = tape {
+            let left_id = self.node_id.unwrap_or_else(|| {
+                tape.add_node(Node {
+                    op:            OpType::Leaf,
+                    parents:       Vec::new(),
+                    requires_grad: self.requires_grad,
+                    layout:        self.layout.clone(),
+                    value:         self.storage.clone(),
+                    grad_slot:     self.grad.clone(),
+                })
+            });
+
+            let right_id = rhs.node_id.unwrap_or_else(|| {
+                tape.add_node(Node {
+                    op:            OpType::Leaf,
+                    parents:       Vec::new(),
+                    requires_grad: rhs.requires_grad,
+                    layout:        rhs.layout.clone(),
+                    value:         rhs.storage.clone(),
+                    grad_slot:     rhs.grad.clone(),
+                })
+            });
+
+            let out_grad = Arc::new(Mutex::new(None));
+            let out_id = tape.add_node(Node {
+                op,
+                parents: vec![left_id, right_id],
+                requires_grad: needs_grad,
+                layout: out.layout.clone(),
+                value: out.storage.clone(),
+                grad_slot: Some(out_grad.clone()),
+            });
+
+            out.tape = Some(tape);
+            out.node_id = Some(out_id);
+            out.grad = Some(out_grad);
+        }
+
+        Ok(out)
+    }
+
+    pub fn backward(&self) -> Result<()> {
+        if !self.requires_grad {
+            return Ok(());
+        }
+
+        let (Some(tape), Some(root_id)) = (&self.tape, self.node_id) else {
+            return Ok(());
+        };
+
+        let mut stack = vec![root_id];
+        let mut visited = HashSet::new();
+        let mut order = Vec::new();
+
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+
+            order.push(id);
+            if let Some(node) = tape.node(id) {
+                for parent in node.parents {
+                    stack.push(parent);
+                }
+            }
+        }
+
+        order.sort_by_key(|id| id.0);
+        order.reverse();
+
+        let mut grads: HashMap<NodeId, Tensor<T, B>> = HashMap::new();
+        grads.insert(
+            root_id,
+            Tensor::ones(self.layout.clone(), self.backend.clone()),
+        );
+
+        let add_grad =
+            |grads: &mut HashMap<NodeId, Tensor<T, B>>, id: NodeId, grad: Tensor<T, B>| {
+                if let Some(existing) = grads.remove(&id) {
+                    let sum = (&existing + &grad).expect("tensor addition failed in backward");
+                    grads.insert(id, sum);
+                } else {
+                    grads.insert(id, grad);
+                }
+            };
+
+        for id in order {
+            let grad = match grads.remove(&id) {
+                Some(g) => g,
+                None => continue,
+            };
+
+            let node = match tape.node(id) {
+                Some(n) => n,
+                None => continue,
+            };
+
+            tape.set_grad(id, grad.storage.clone());
+
+            match node.op {
+                OpType::Leaf => continue,
+                OpType::Add | OpType::Sub | OpType::Mul | OpType::Div | OpType::MatMul => {
+                    if node.parents.len() != 2 {
+                        continue;
+                    }
+                }
+            }
+
+            let left = match tape.node(node.parents[0]) {
+                Some(n) => n,
+                None => continue,
+            };
+
+            let right = match tape.node(node.parents[1]) {
+                Some(n) => n,
+                None => continue,
+            };
+
+            let a = Tensor::from_parts(
+                left.value.clone(),
+                left.layout.clone(),
+                self.backend.clone(),
+            );
+
+            let b = Tensor::from_parts(
+                right.value.clone(),
+                right.layout.clone(),
+                self.backend.clone(),
+            );
+
+            match node.op {
+                OpType::Add => {
+                    add_grad(&mut grads, node.parents[0], grad.clone());
+                    add_grad(&mut grads, node.parents[1], grad);
+                }
+                OpType::Sub => {
+                    add_grad(&mut grads, node.parents[0], grad.clone());
+                    let neg = (Tensor::zeros(node.layout.clone(), self.backend.clone()) - grad)
+                        .expect("backward subtraction: negation failed");
+                    add_grad(&mut grads, node.parents[1], neg);
+                }
+                OpType::Mul => {
+                    let ga = (&grad * &b).expect("backward multiplication: left grad failed");
+                    let gb = (&grad * &a).expect("backward multiplication: right grad failed");
+                    add_grad(&mut grads, node.parents[0], ga);
+                    add_grad(&mut grads, node.parents[1], gb);
+                }
+                OpType::Div => {
+                    let ga = (&grad / &b).expect("backward division: left grad failed");
+                    let b_sq = (&b * &b).expect("backward division: b squared failed");
+                    let gb = (&grad * &a).expect("backward division: right grad failed");
+                    let gb = (&gb / &b_sq).expect("backward division: right grad div failed");
+                    let neg = (Tensor::zeros(node.layout.clone(), self.backend.clone()) - gb)
+                        .expect("backward division: right grad negation failed");
+                    add_grad(&mut grads, node.parents[0], ga);
+                    add_grad(&mut grads, node.parents[1], neg);
+                }
+                OpType::MatMul => {
+                    // TODO
+                }
+                OpType::Leaf => {}
+            }
+        }
+
+        Ok(())
     }
 
     // TODO: avoid unnecessary clone
@@ -77,7 +328,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+            grad: self.grad.clone(),
         })
     }
 
@@ -92,7 +346,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+            grad: self.grad.clone(),
         })
     }
 
@@ -107,7 +364,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+            grad: self.grad.clone(),
         })
     }
 
@@ -122,7 +382,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 layout,
                 storage: self.storage.clone(),
                 backend: self.backend.clone(),
-                requires_grad: self.requires_grad.clone(),
+                requires_grad: self.requires_grad,
+                tape: self.tape.clone(),
+                node_id: self.node_id,
+                grad: self.grad.clone(),
             })
         } else {
             todo!("non-contiguous reshape not implemented yet")
@@ -140,7 +403,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+            grad: self.grad.clone(),
         })
     }
 
@@ -155,7 +421,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+            grad: self.grad.clone(),
         })
     }
 }

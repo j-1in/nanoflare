@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::ops::{Index, RangeInclusive, RangeTo};
+use std::ops::{Index, RangeInclusive};
 
 use crate::{Error, Result};
 
@@ -104,8 +104,9 @@ impl TensorLayout {
     ///
     /// # Example
     /// ```rust
+    /// use nanoflare::layout::TensorLayout;
     /// let layout = TensorLayout::new(vec![2, 3, 4]);
-    /// let permuted_layout = layout.permute(&[2, 0, 1]);
+    /// let permuted_layout = layout.permute(&[2, 0, 1]).unwrap();
     /// assert_eq!(permuted_layout.shape().as_slice(), &[4, 2, 3]);
     /// ```
     ///
@@ -208,6 +209,7 @@ impl TensorLayout {
     ///
     /// # Example
     /// ```rust
+    /// use nanoflare::layout::{TensorLayout, TensorShape};
     /// let layout = TensorLayout::new(vec![12, 4]);
     /// // You can pass a slice directly
     /// let split_layout = layout.split(0, &[3, 4]).unwrap();
@@ -224,6 +226,8 @@ impl TensorLayout {
     /// ```
     /// # Errors
     /// ```rust
+    /// use nanoflare::Error;
+    /// use nanoflare::layout::TensorLayout;
     /// let layout = TensorLayout::new(vec![10, 4]);
     /// let err = layout.split(0, &[3, 4]).unwrap_err();
     /// match err {
@@ -267,6 +271,12 @@ impl TensorLayout {
             }
             let inferred_size = original_size / non_zero_product;
             final_sizes[zero_index] = inferred_size;
+        } else {
+            // No wildcard provided: the product of the provided sizes must exactly
+            // equal the original dimension size.
+            if non_zero_product != original_size {
+                return Err(Error::InvalidDimensionSplit { original_size, shape: final_sizes });
+            }
         }
 
         let mut new_shape = Vec::new();
