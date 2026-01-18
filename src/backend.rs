@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 
-use crate::Result;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use crate::tensor::Tensor;
+use crate::Result;
 
 pub mod cpu;
 pub mod cuda;
@@ -21,8 +21,4 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
     fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
     fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
     fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
-
-    fn validate_same_layout<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) {
-        assert!(a.layout() == b.layout(), "Layouts must be the same.");
-    }
 }

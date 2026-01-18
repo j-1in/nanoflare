@@ -1,7 +1,13 @@
 use std::fmt;
 
+use crate::TensorLayout;
+
 #[derive(Debug)]
 pub enum Error {
+    LayoutMismatch {
+        a: TensorLayout,
+        b: TensorLayout,
+    },
     RankMismatch {
         expected: usize,
         got:      usize,
@@ -44,6 +50,13 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Error::LayoutMismatch { a, b } => {
+                write!(
+                    f,
+                    "layout mismatch:\n shape a:\n{:?}\n shape b:\n{:?}",
+                    a, b
+                )
+            }
             Error::RankMismatch { expected, got } => {
                 write!(f, "expected {} axes, got {}", expected, got)
             }

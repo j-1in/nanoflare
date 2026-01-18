@@ -2,20 +2,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
+use crate::ops::OpType;
 use crate::storage::TensorStorage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpType {
-    Leaf,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    MatMul,
-}
 
 #[derive(Debug, Clone)]
 pub struct Node<T: DType> {

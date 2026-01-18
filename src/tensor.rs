@@ -3,12 +3,13 @@ use std::fmt::Debug;
 use std::ops::{Add, Div, Index, Mul, RangeInclusive, Sub};
 use std::sync::{Arc, Mutex};
 
-use crate::Result;
-use crate::autograd::{Node, NodeId, OpType, Tape};
+use crate::autograd::{Node, NodeId, Tape};
 use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
+use crate::ops::OpType;
 use crate::storage::TensorStorage;
+use crate::Result;
 
 macro_rules! impl_binary_op {
     ($($trait:ident, $method:ident, $op:expr);* $(;)?) => {
@@ -132,6 +133,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     where
         F: FnOnce(&B, &Tensor<T, B>, &Tensor<T, B>) -> Result<Tensor<T, B>>,
     {
+        op.validate_binop(self, rhs)?;
+
         let mut out = f(&self.backend, self, rhs)?;
 
         let needs_grad = self.requires_grad || rhs.requires_grad;
