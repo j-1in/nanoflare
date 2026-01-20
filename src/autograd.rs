@@ -10,12 +10,48 @@ pub struct NodeId(pub usize);
 
 #[derive(Debug, Clone)]
 pub struct Node<T: DType> {
-    pub op:            OpType,
-    pub parents:       Vec<NodeId>,
-    pub requires_grad: bool,
-    pub layout:        TensorLayout,
-    pub value:         TensorStorage<T>,
-    pub grad_slot:     Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
+    op:            OpType,
+    parents:       Vec<NodeId>,
+    requires_grad: bool,
+    layout:        TensorLayout,
+    value:         TensorStorage<T>,
+    grad_slot:     Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
+}
+
+impl<T: DType> Node<T> {
+    pub fn new(
+        op: OpType,
+        parents: Vec<NodeId>,
+        requires_grad: bool,
+        layout: TensorLayout,
+        value: TensorStorage<T>,
+        grad_slot: Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
+    ) -> Self {
+        Node {
+            op,
+            parents,
+            requires_grad,
+            layout,
+            value,
+            grad_slot,
+        }
+    }
+
+    pub fn parents(&self) -> &Vec<NodeId> {
+        &self.parents
+    }
+
+    pub fn op(&self) -> OpType {
+        self.op
+    }
+
+    pub fn value(&self) -> &TensorStorage<T> {
+        &self.value
+    }
+
+    pub fn layout(&self) -> &TensorLayout {
+        &self.layout
+    }
 }
 
 #[derive(Debug, Default)]

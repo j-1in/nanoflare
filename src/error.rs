@@ -1,12 +1,12 @@
 use std::fmt;
 
-use crate::TensorLayout;
+use crate::TensorShape;
 
 #[derive(Debug)]
 pub enum Error {
     LayoutMismatch {
-        a: TensorLayout,
-        b: TensorLayout,
+        a: TensorShape,
+        b: TensorShape,
     },
     RankMismatch {
         expected: usize,

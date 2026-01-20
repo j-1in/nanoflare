@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, RangeFull};
 use std::sync::Arc;
 
 use crate::dtype::DType;
@@ -8,6 +8,26 @@ use crate::dtype::DType;
 pub enum TensorStorage<T: DType> {
     Cpu(Arc<CpuStorage<T>>),
     Cuda(Arc<CudaStorage<T>>),
+}
+
+impl<T: DType> TensorStorage<T> {
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            TensorStorage::Cpu(storage) => &storage.0,
+            TensorStorage::Cuda(storage) => &storage.data,
+        }
+    }
+}
+
+impl<T: DType> Index<RangeFull> for TensorStorage<T> {
+    type Output = [T];
+
+    fn index(&self, _index: RangeFull) -> &Self::Output {
+        match self {
+            TensorStorage::Cpu(storage) => &storage.0,
+            TensorStorage::Cuda(storage) => &storage.data,
+        }
+    }
 }
 
 impl<T: DType> Index<usize> for TensorStorage<T> {
@@ -34,6 +54,12 @@ impl<T: DType> IndexMut<usize> for TensorStorage<T> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CpuStorage<T: DType>(Vec<T>);
+
+impl<T: DType> CpuStorage<T> {
+    pub fn new(data: Vec<T>) -> Self {
+        CpuStorage(data)
+    }
+}
 
 impl<T: DType> CpuStorage<T> {
     pub fn zeros(size: usize) -> Self {

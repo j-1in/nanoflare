@@ -10,15 +10,15 @@ pub enum OpType {
     MatMul,
 }
 
-pub(crate) fn layouts_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
+pub(crate) fn shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
 where
     T: crate::dtype::DType,
     B: crate::backend::Backend<T>,
 {
-    if a.layout() != b.layout() {
+    if a.layout().shape() != b.layout().shape() {
         return Err(crate::Error::LayoutMismatch {
-            a: a.layout().clone(),
-            b: b.layout().clone(),
+            a: a.layout().shape().clone(),
+            b: b.layout().shape().clone(),
         });
     }
     Ok(())
@@ -31,7 +31,7 @@ impl OpType {
         B: crate::backend::Backend<T>,
     {
         match self {
-            OpType::Add | OpType::Sub | OpType::Mul | OpType::Div => layouts_match(a, b),
+            OpType::Add | OpType::Sub | OpType::Mul | OpType::Div => shapes_match(a, b),
             _ => Ok(()),
         }
     }

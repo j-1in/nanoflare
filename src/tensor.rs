@@ -86,14 +86,14 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
     pub fn requires_grad(mut self, tape: Arc<Tape<T>>) -> Self {
         let grad_slot = Arc::new(Mutex::new(None));
-        let node_id = tape.add_node(Node {
-            op:            OpType::Leaf,
-            parents:       Vec::new(),
-            requires_grad: true,
-            layout:        self.layout.clone(),
-            value:         self.storage.clone(),
-            grad_slot:     Some(grad_slot.clone()),
-        });
+        let node_id = tape.add_node(Node::new(
+            OpType::Leaf,
+            Vec::new(),
+            true,
+            self.layout.clone(),
+            self.storage.clone(),
+            Some(grad_slot.clone()),
+        ));
 
         self.requires_grad = true;
         self.tape = Some(tape);
@@ -153,36 +153,36 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
         if let Some(tape) = tape {
             let left_id = self.node_id.unwrap_or_else(|| {
-                tape.add_node(Node {
-                    op:            OpType::Leaf,
-                    parents:       Vec::new(),
-                    requires_grad: self.requires_grad,
-                    layout:        self.layout.clone(),
-                    value:         self.storage.clone(),
-                    grad_slot:     self.grad.clone(),
-                })
+                tape.add_node(Node::new(
+                    OpType::Leaf,
+                    Vec::new(),
+                    self.requires_grad,
+                    self.layout.clone(),
+                    self.storage.clone(),
+                    self.grad.clone(),
+                ))
             });
 
             let right_id = rhs.node_id.unwrap_or_else(|| {
-                tape.add_node(Node {
-                    op:            OpType::Leaf,
-                    parents:       Vec::new(),
-                    requires_grad: rhs.requires_grad,
-                    layout:        rhs.layout.clone(),
-                    value:         rhs.storage.clone(),
-                    grad_slot:     rhs.grad.clone(),
-                })
+                tape.add_node(Node::new(
+                    OpType::Leaf,
+                    Vec::new(),
+                    self.requires_grad,
+                    self.layout.clone(),
+                    self.storage.clone(),
+                    self.grad.clone(),
+                ))
             });
 
             let out_grad = Arc::new(Mutex::new(None));
-            let out_id = tape.add_node(Node {
+            let out_id = tape.add_node(Node::new(
                 op,
-                parents: vec![left_id, right_id],
-                requires_grad: needs_grad,
-                layout: out.layout.clone(),
-                value: out.storage.clone(),
-                grad_slot: Some(out_grad.clone()),
-            });
+                vec![left_id, right_id],
+                needs_grad,
+                out.layout.clone(),
+                out.storage.clone(),
+                Some(out_grad.clone()),
+            ));
 
             out.tape = Some(tape);
             out.node_id = Some(out_id);
@@ -212,8 +212,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
             order.push(id);
             if let Some(node) = tape.node(id) {
-                for parent in node.parents {
-                    stack.push(parent);
+                for parent in node.parents() {
+                    stack.push(*parent);
                 }
             }
         }
@@ -250,63 +250,63 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
             tape.set_grad(id, grad.storage.clone());
 
-            match node.op {
+            match node.op() {
                 OpType::Leaf => continue,
                 OpType::Add | OpType::Sub | OpType::Mul | OpType::Div | OpType::MatMul => {
-                    if node.parents.len() != 2 {
+                    if node.parents().len() != 2 {
                         continue;
                     }
                 }
             }
 
-            let left = match tape.node(node.parents[0]) {
+            let left = match tape.node(node.parents()[0]) {
                 Some(n) => n,
                 None => continue,
             };
 
-            let right = match tape.node(node.parents[1]) {
+            let right = match tape.node(node.parents()[1]) {
                 Some(n) => n,
                 None => continue,
             };
 
             let a = Tensor::from_parts(
-                left.value.clone(),
-                left.layout.clone(),
+                left.value().clone(),
+                left.layout().clone(),
                 self.backend.clone(),
             );
 
             let b = Tensor::from_parts(
-                right.value.clone(),
-                right.layout.clone(),
+                right.value().clone(),
+                right.layout().clone(),
                 self.backend.clone(),
             );
 
-            match node.op {
+            match node.op() {
                 OpType::Add => {
-                    add_grad(&mut grads, node.parents[0], grad.clone());
-                    add_grad(&mut grads, node.parents[1], grad);
+                    add_grad(&mut grads, node.parents()[0], grad.clone());
+                    add_grad(&mut grads, node.parents()[1], grad);
                 }
                 OpType::Sub => {
-                    add_grad(&mut grads, node.parents[0], grad.clone());
-                    let neg = (Tensor::zeros(node.layout.clone(), self.backend.clone()) - grad)
+                    add_grad(&mut grads, node.parents()[0], grad.clone());
+                    let neg = (Tensor::zeros(node.layout().clone(), self.backend.clone()) - grad)
                         .expect("backward subtraction: negation failed");
-                    add_grad(&mut grads, node.parents[1], neg);
+                    add_grad(&mut grads, node.parents()[1], neg);
                 }
                 OpType::Mul => {
                     let ga = (&grad * &b).expect("backward multiplication: left grad failed");
                     let gb = (&grad * &a).expect("backward multiplication: right grad failed");
-                    add_grad(&mut grads, node.parents[0], ga);
-                    add_grad(&mut grads, node.parents[1], gb);
+                    add_grad(&mut grads, node.parents()[0], ga);
+                    add_grad(&mut grads, node.parents()[1], gb);
                 }
                 OpType::Div => {
                     let ga = (&grad / &b).expect("backward division: left grad failed");
                     let b_sq = (&b * &b).expect("backward division: b squared failed");
                     let gb = (&grad * &a).expect("backward division: right grad failed");
                     let gb = (&gb / &b_sq).expect("backward division: right grad div failed");
-                    let neg = (Tensor::zeros(node.layout.clone(), self.backend.clone()) - gb)
+                    let neg = (Tensor::zeros(node.layout().clone(), self.backend.clone()) - gb)
                         .expect("backward division: right grad negation failed");
-                    add_grad(&mut grads, node.parents[0], ga);
-                    add_grad(&mut grads, node.parents[1], neg);
+                    add_grad(&mut grads, node.parents()[0], ga);
+                    add_grad(&mut grads, node.parents()[1], neg);
                 }
                 OpType::MatMul => {
                     // TODO

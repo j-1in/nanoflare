@@ -15,6 +15,14 @@ impl TensorLayout {
         &self.shape
     }
 
+    pub fn strides(&self) -> &[usize] {
+        &self.strides
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
     pub fn new(shape: Vec<usize>) -> Self {
         let strides = Self::compute_stride(&shape);
 
@@ -73,7 +81,7 @@ impl TensorLayout {
             return Ok(vec![]);
         }
 
-        let total = self.shape.size();
+        let total = self.shape.numel();
         // The provided `index` is expected to be an index into the underlying
         // buffer; it must fall within the window described by `offset .. offset +
         // total`.
@@ -226,8 +234,8 @@ impl TensorLayout {
     /// ```
     /// # Errors
     /// ```rust
-    /// use nanoflare::Error;
     /// use nanoflare::layout::TensorLayout;
+    /// use nanoflare::Error;
     /// let layout = TensorLayout::new(vec![10, 4]);
     /// let err = layout.split(0, &[3, 4]).unwrap_err();
     /// match err {
@@ -356,7 +364,7 @@ impl TensorLayout {
     pub fn reshape(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
         let shape = shape.as_ref();
 
-        if shape.iter().product::<usize>() != self.shape().size() {
+        if shape.iter().product::<usize>() != self.shape().numel() {
             return Err(Error::TensorSizeMismatch {
                 expected: self.shape().as_slice().to_vec(),
                 got:      shape.to_vec(),
@@ -463,6 +471,14 @@ impl TensorLayout {
             offset:  self.offset,
         })
     }
+
+    pub fn contiguous(&self) -> Self {
+        Self {
+            shape:   self.shape.clone(),
+            strides: Self::compute_stride(self.shape.as_slice()),
+            offset:  self.offset,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -477,7 +493,7 @@ impl TensorShape {
         &self.0
     }
 
-    pub fn size(&self) -> usize {
+    pub fn numel(&self) -> usize {
         self.0.iter().product()
     }
 
