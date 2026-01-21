@@ -6,30 +6,11 @@ use crate::dtype::DType;
 
 pub trait TensorStorage<T: DType>: Debug + Clone + Send + Sync {
     fn len(&self) -> usize;
-    fn as_slice(&self) -> &[T];
-    fn as_mut_slice(&mut self) -> &mut [T];
-    fn i(&self, index: usize) -> &T;
 }
 
 impl<T: DType, S: TensorStorage<T>> TensorStorage<T> for Arc<S> {
     fn len(&self) -> usize {
         (**self).len()
-    }
-
-    fn as_slice(&self) -> &[T] {
-        (**self).as_slice()
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        // CRITICAL OPTIMIZATION: Copy-on-Write!
-        // If this Arc is shared (ref_count > 1), make_mut will clone the data
-        // automatically before giving you mutable access.
-        // If it is unique (ref_count == 1), it returns the mutable reference cheaply.
-        Arc::make_mut(self).as_mut_slice()
-    }
-
-    fn i(&self, index: usize) -> &T {
-        (**self).i(index)
     }
 }
 
@@ -46,18 +27,6 @@ impl<T: DType> TensorStorage<T> for CpuStorage<T> {
     fn len(&self) -> usize {
         self.0.len()
     }
-
-    fn as_slice(&self) -> &[T] {
-        &self.0
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.0
-    }
-
-    fn i(&self, index: usize) -> &T {
-        &self.0[index]
-    }
 }
 
 impl<T: DType> CpuStorage<T> {
@@ -69,6 +38,10 @@ impl<T: DType> CpuStorage<T> {
     pub fn ones(size: usize) -> Self {
         let data: Vec<T> = vec![T::one(); size];
         CpuStorage(data)
+    }
+
+    pub(crate) fn as_slice(&self) -> &[T] {
+        &self.0
     }
 }
 
@@ -103,18 +76,6 @@ pub struct CudaStorage<T: DType> {
 impl<T: DType> TensorStorage<T> for CudaStorage<T> {
     fn len(&self) -> usize {
         self.data.len()
-    }
-
-    fn as_slice(&self) -> &[T] {
-        &self.data
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.data
-    }
-
-    fn i(&self, index: usize) -> &T {
-        &self.data[index]
     }
 }
 

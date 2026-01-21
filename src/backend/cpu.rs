@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
-use crate::storage::{CpuStorage, TensorStorage as _};
+use crate::storage::CpuStorage;
 use crate::tensor::Tensor;
 use crate::Result;
 

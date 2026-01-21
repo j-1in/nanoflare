@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Index, RangeInclusive};
 
+use crate::index::TensorIndex;
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +32,10 @@ impl TensorLayout {
             strides,
             offset: 0,
         }
+    }
+
+    pub fn get<I: AsRef<[TensorIndex]>>(&self, indices: I) -> Result<Self> {
+        unimplemented!()
     }
 
     pub fn compute_stride(shape: &[usize]) -> Vec<usize> {

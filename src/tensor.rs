@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use crate::autograd::{Node, NodeId, Tape};
 use crate::backend::Backend;
 use crate::dtype::DType;
+use crate::index::TensorIndex;
 use crate::layout::TensorLayout;
 use crate::ops::OpType;
-use crate::storage::TensorStorage as _;
 use crate::Result;
 
 macro_rules! impl_binary_op {
@@ -52,14 +52,6 @@ impl_binary_op!(
 );
 
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
-    pub fn i(&self, indices: &[usize]) -> Result<&T> {
-        let idx = self
-            .layout
-            .ravel_index(indices)
-            .expect("invalid index for tensor");
-        Ok(&self.storage.i(idx))
-    }
-
     /// Create a new tensor filled with zeros, given a specific layout and
     /// backend.
     pub fn zeros(layout: TensorLayout, backend: Arc<B>) -> Self {
@@ -81,6 +73,19 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     pub fn ones(layout: TensorLayout, backend: Arc<B>) -> Self {
         let storage = backend.store_ones(&layout);
 
+        Tensor {
+            storage,
+            layout,
+            backend,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
+            grad: None,
+        }
+    }
+
+    /// Create a new tensor from the given storage, layout, and backend.
+    pub fn from_parts(storage: B::Storage, layout: TensorLayout, backend: Arc<B>) -> Self {
         Tensor {
             storage,
             layout,
@@ -125,16 +130,43 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         &self.backend
     }
 
-    pub fn from_parts(storage: B::Storage, layout: TensorLayout, backend: Arc<B>) -> Self {
-        Tensor {
-            storage,
+    /// Get some element(s) from the tensor by specifying indices or slices.
+    ///
+    /// # Returns
+    /// A new `Tensor` view containing the selected elements.
+    ///
+    /// # Example
+    /// ```rust
+    /// use nanoflare::backend::cpu::CpuBackend;
+    /// use nanoflare::Tensor;
+    ///
+    /// let backend = std::sync::Arc::new(CpuBackend);
+    /// let layout = nanoflare::TensorLayout::new(vec![2, 3]);
+    /// let tensor = Tensor::<f32, _>::ones(layout, backend);
+    ///
+    /// // Get a single element
+    /// let element = tensor.get([0, 1]);
+    ///
+    /// // Get a slice of the tensor
+    /// let slice = tensor.get([0..2, 1..3]);
+    ///
+    /// // Get a sub-tensor
+    /// let sub_tensor = tensor.get([0..1, 0..2]);
+    ///
+    /// // Get
+    /// ```
+    pub fn get<I: AsRef<[TensorIndex]>>(&self, indices: I) -> Result<Self> {
+        let layout = self.layout.get(indices)?;
+
+        Ok(Tensor {
             layout,
-            backend,
-            requires_grad: false,
-            tape: None,
-            node_id: None,
-            grad: None,
-        }
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+            grad: self.grad.clone(),
+        })
     }
 
     fn binary_op<F>(&self, rhs: &Tensor<T, B>, op: OpType, f: F) -> Result<Self>
@@ -437,5 +469,34 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             node_id: self.node_id,
             grad: self.grad.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i;
+
+    #[test]
+    fn test_tensor_indexing() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend);
+        let layout = TensorLayout::new(vec![2, 3]);
+        let tensor = Tensor::<f32, _>::ones(layout, backend);
+
+        // Get a single element
+        let element = tensor.get(i![0, 1]).unwrap();
+        assert_eq!(element.layout().shape().as_slice(), &[1, 1]);
+
+        // Get a slice of the tensor
+        let slice = tensor.get(i![0..2, 1..3]).unwrap();
+        assert_eq!(slice.layout().shape().as_slice(), &[2, 2]);
+
+        // Get a sub-tensor
+        let sub_tensor = tensor.get(i![0..1, 0..2]).unwrap();
+        assert_eq!(sub_tensor.layout().shape().as_slice(), &[1, 2]);
+
+        // Get a full tensor
+        let full_tensor = tensor.get(i![.., ..]).unwrap();
+        assert_eq!(full_tensor.layout().shape().as_slice(), &[2, 3]);
     }
 }
