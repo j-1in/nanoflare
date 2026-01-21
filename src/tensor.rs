@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::ops::{Add, Div, Index, Mul, RangeInclusive, Sub};
+use std::ops::{Add, Div, Mul, RangeInclusive, Sub};
 use std::sync::{Arc, Mutex};
 
 use crate::autograd::{Node, NodeId, Tape};
@@ -8,7 +8,7 @@ use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::ops::OpType;
-use crate::storage::Storage as _;
+use crate::storage::TensorStorage as _;
 use crate::Result;
 
 macro_rules! impl_binary_op {
@@ -439,15 +439,3 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         })
     }
 }
-
-// impl<T: DType, B: Backend<T>> Index<&[usize]> for Tensor<T, B> {
-//     type Output = T;
-
-//     fn index(&self, indices: &[usize]) -> &Self::Output {
-//         let idx = self
-//             .layout
-//             .ravel_index(indices)
-//             .expect("invalid index for tensor");
-//         &self.storage[idx]
-//     }
-// }

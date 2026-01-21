@@ -14,7 +14,7 @@ use crate::Result;
 pub struct CudaBackend;
 
 impl<T: DType> Backend<T> for CudaBackend {
-    type Storage = CudaStorage<T>;
+    type Storage = Arc<CudaStorage<T>>;
 
     fn store_zeros(&self, layout: &TensorLayout) -> Self::Storage {
         unimplemented!()

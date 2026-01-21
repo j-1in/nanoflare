@@ -4,12 +4,71 @@ use std::sync::Arc;
 use super::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
-use crate::storage::{CpuStorage, Storage as _};
+use crate::storage::{CpuStorage, TensorStorage as _};
 use crate::tensor::Tensor;
 use crate::Result;
 
 #[derive(Debug, Clone)]
 pub struct CpuBackend;
+
+impl<T: DType> Backend<T> for CpuBackend {
+    type Storage = Arc<CpuStorage<T>>;
+
+    fn store_zeros(&self, layout: &TensorLayout) -> Self::Storage {
+        let size = layout.shape().numel();
+        Arc::new(CpuStorage::zeros(size))
+    }
+
+    fn store_ones(&self, layout: &TensorLayout) -> Self::Storage {
+        let size = layout.shape().numel();
+        Arc::new(CpuStorage::ones(size))
+    }
+
+    fn from_vec(&self, data: Vec<T>) -> Self::Storage {
+        Arc::new(CpuStorage::new(data))
+    }
+
+    fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        if a.layout().is_contiguous() && b.layout().is_contiguous() {
+            let a_offset = a.layout().offset();
+            let b_offset = b.layout().offset();
+            let numel = a.layout().shape().numel();
+
+            let a_slice = &a.storage().as_slice()[a_offset..a_offset + numel];
+            let b_slice = &b.storage().as_slice()[b_offset..b_offset + numel];
+
+            let data: Vec<T> = a_slice
+                .iter()
+                .zip(b_slice.iter())
+                .map(|(&x, &y)| x + y)
+                .collect();
+
+            return Ok(Tensor::from_parts(
+                self.from_vec(data),
+                a.layout().clone(),
+                a.backend().clone(),
+            ));
+        }
+
+        self.strided_binary_op(a, b, |x, y| x + y)
+    }
+
+    fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        todo!()
+    }
+
+    fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        todo!()
+    }
+
+    fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        todo!()
+    }
+
+    fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        todo!()
+    }
+}
 
 impl CpuBackend {
     pub fn new() -> Self {
@@ -64,60 +123,6 @@ impl CpuBackend {
             res_layout,
             a.backend().clone(),
         ))
-    }
-}
-
-impl<T: DType> Backend<T> for CpuBackend {
-    type Storage = CpuStorage<T>;
-
-    fn store_zeros(&self, layout: &TensorLayout) -> Self::Storage {
-        let size = layout.shape().numel();
-        CpuStorage::zeros(size)
-    }
-
-    fn store_ones(&self, layout: &TensorLayout) -> Self::Storage {
-        let size = layout.shape().numel();
-        CpuStorage::ones(size)
-    }
-
-    fn from_vec(&self, data: Vec<T>) -> Self::Storage {
-        CpuStorage::new(data)
-    }
-
-    fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        if a.layout().is_contiguous() && b.layout().is_contiguous() {
-            let data: Vec<T> = a
-                .storage()
-                .as_slice()
-                .iter()
-                .zip(b.storage().as_slice().iter())
-                .map(|(&x, &y)| x + y)
-                .collect();
-
-            return Ok(Tensor::from_parts(
-                self.from_vec(data),
-                a.layout().clone(),
-                a.backend().clone(),
-            ));
-        }
-
-        self.strided_binary_op(a, b, |x, y| x + y)
-    }
-
-    fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
-    }
-
-    fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
-    }
-
-    fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
-    }
-
-    fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
     }
 }
 

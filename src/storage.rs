@@ -1,61 +1,36 @@
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut, RangeFull};
+use std::sync::Arc;
 
 use crate::dtype::DType;
 
-// #[derive(Debug, Clone)]
-// pub enum TensorStorage<T: DType> {
-//     Cpu(Arc<CpuStorage<T>>),
-//     Cuda(Arc<CudaStorage<T>>),
-// }
-
-// impl<T: DType> TensorStorage<T> {
-//     pub fn as_slice(&self) -> &[T] {
-//         match self {
-//             TensorStorage::Cpu(storage) => &storage.0,
-//             TensorStorage::Cuda(storage) => &storage.data,
-//         }
-//     }
-// }
-
-// impl<T: DType> Index<RangeFull> for TensorStorage<T> {
-//     type Output = [T];
-
-//     fn index(&self, _index: RangeFull) -> &Self::Output {
-//         match self {
-//             TensorStorage::Cpu(storage) => &storage.0,
-//             TensorStorage::Cuda(storage) => &storage.data,
-//         }
-//     }
-// }
-
-// impl<T: DType> Index<usize> for TensorStorage<T> {
-//     type Output = T;
-
-//     fn index(&self, index: usize) -> &Self::Output {
-//         match self {
-//             TensorStorage::Cpu(storage) => &storage[index],
-//             TensorStorage::Cuda(storage) => &storage[index],
-//         }
-//     }
-// }
-
-// impl<T: DType> IndexMut<usize> for TensorStorage<T> {
-//     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-//         match self {
-//             TensorStorage::Cpu(storage) => &mut Arc::get_mut(storage)
-//                 .expect("Cannot get mutable reference to CpuStorage inside
-// Arc")[index],             TensorStorage::Cuda(storage) => &mut
-// Arc::get_mut(storage)                 .expect("Cannot get mutable reference
-// to CudaStorage inside Arc")[index],         }
-//     }
-// }
-
-pub trait Storage<T: DType>: Debug + Clone + Send + Sync {
+pub trait TensorStorage<T: DType>: Debug + Clone + Send + Sync {
     fn len(&self) -> usize;
     fn as_slice(&self) -> &[T];
     fn as_mut_slice(&mut self) -> &mut [T];
     fn i(&self, index: usize) -> &T;
+}
+
+impl<T: DType, S: TensorStorage<T>> TensorStorage<T> for Arc<S> {
+    fn len(&self) -> usize {
+        (**self).len()
+    }
+
+    fn as_slice(&self) -> &[T] {
+        (**self).as_slice()
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        // CRITICAL OPTIMIZATION: Copy-on-Write!
+        // If this Arc is shared (ref_count > 1), make_mut will clone the data
+        // automatically before giving you mutable access.
+        // If it is unique (ref_count == 1), it returns the mutable reference cheaply.
+        Arc::make_mut(self).as_mut_slice()
+    }
+
+    fn i(&self, index: usize) -> &T {
+        (**self).i(index)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +42,7 @@ impl<T: DType> CpuStorage<T> {
     }
 }
 
-impl<T: DType> Storage<T> for CpuStorage<T> {
+impl<T: DType> TensorStorage<T> for CpuStorage<T> {
     fn len(&self) -> usize {
         self.0.len()
     }
@@ -125,7 +100,7 @@ pub struct CudaStorage<T: DType> {
     data: Vec<T>, // Placeholder for compilation
 }
 
-impl<T: DType> Storage<T> for CudaStorage<T> {
+impl<T: DType> TensorStorage<T> for CudaStorage<T> {
     fn len(&self) -> usize {
         self.data.len()
     }
