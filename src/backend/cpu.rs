@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
-use crate::storage::{CpuStorage, TensorStorage};
+use crate::storage::{CpuStorage, Storage as _};
 use crate::tensor::Tensor;
 use crate::Result;
 
@@ -16,15 +16,14 @@ impl CpuBackend {
         CpuBackend
     }
 
-    fn strided_binary_op<T, B, F>(
+    fn strided_binary_op<T, F>(
         &self,
-        a: &Tensor<T, B>,
-        b: &Tensor<T, B>,
+        a: &Tensor<T, Self>,
+        b: &Tensor<T, Self>,
         op: F,
-    ) -> Result<Tensor<T, B>>
+    ) -> Result<Tensor<T, Self>>
     where
         T: DType,
-        B: Backend<T>,
         F: Fn(T, T) -> T + Sync + Send,
     {
         let shape = a.layout().shape().as_slice();
@@ -69,26 +68,23 @@ impl CpuBackend {
 }
 
 impl<T: DType> Backend<T> for CpuBackend {
-    fn store_zeros(&self, layout: &TensorLayout) -> TensorStorage<T> {
+    type Storage = CpuStorage<T>;
+
+    fn store_zeros(&self, layout: &TensorLayout) -> Self::Storage {
         let size = layout.shape().numel();
-        let storage = CpuStorage::zeros(size);
-
-        TensorStorage::Cpu(Arc::new(storage))
+        CpuStorage::zeros(size)
     }
 
-    fn store_ones(&self, layout: &TensorLayout) -> TensorStorage<T> {
+    fn store_ones(&self, layout: &TensorLayout) -> Self::Storage {
         let size = layout.shape().numel();
-        let storage = CpuStorage::ones(size);
-
-        TensorStorage::Cpu(Arc::new(storage))
+        CpuStorage::ones(size)
     }
 
-    fn from_vec(&self, data: Vec<T>) -> TensorStorage<T> {
-        let storage = CpuStorage::new(data);
-        TensorStorage::Cpu(Arc::new(storage))
+    fn from_vec(&self, data: Vec<T>) -> Self::Storage {
+        CpuStorage::new(data)
     }
 
-    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         if a.layout().is_contiguous() && b.layout().is_contiguous() {
             let data: Vec<T> = a
                 .storage()
@@ -108,19 +104,19 @@ impl<T: DType> Backend<T> for CpuBackend {
         self.strided_binary_op(a, b, |x, y| x + y)
     }
 
-    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         todo!()
     }
 
-    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         todo!()
     }
 
-    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         todo!()
     }
 
-    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         todo!()
     }
 }

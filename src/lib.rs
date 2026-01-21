@@ -13,5 +13,4 @@ pub use backend::cuda::CudaBackend;
 pub use error::{Error, Result};
 pub use layout::{TensorLayout, TensorShape};
 pub use ops::OpType;
-pub use storage::TensorStorage;
 pub use tensor::Tensor;

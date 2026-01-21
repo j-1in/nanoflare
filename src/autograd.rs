@@ -1,31 +1,31 @@
 use std::sync::{Arc, Mutex};
 
+use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::ops::OpType;
-use crate::storage::TensorStorage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
 
 #[derive(Debug, Clone)]
-pub struct Node<T: DType> {
+pub struct Node<T: DType, B: Backend<T>> {
     op:            OpType,
     parents:       Vec<NodeId>,
     requires_grad: bool,
     layout:        TensorLayout,
-    value:         TensorStorage<T>,
-    grad_slot:     Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
+    value:         B::Storage,
+    grad_slot:     Option<Arc<Mutex<Option<B::Storage>>>>,
 }
 
-impl<T: DType> Node<T> {
+impl<T: DType, B: Backend<T>> Node<T, B> {
     pub fn new(
         op: OpType,
         parents: Vec<NodeId>,
         requires_grad: bool,
         layout: TensorLayout,
-        value: TensorStorage<T>,
-        grad_slot: Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
+        value: B::Storage,
+        grad_slot: Option<Arc<Mutex<Option<B::Storage>>>>,
     ) -> Self {
         Node {
             op,
@@ -45,7 +45,7 @@ impl<T: DType> Node<T> {
         self.op
     }
 
-    pub fn value(&self) -> &TensorStorage<T> {
+    pub fn value(&self) -> &B::Storage {
         &self.value
     }
 
@@ -55,30 +55,30 @@ impl<T: DType> Node<T> {
 }
 
 #[derive(Debug, Default)]
-pub struct Tape<T: DType> {
-    nodes: Mutex<Vec<Node<T>>>,
+pub struct Tape<T: DType, B: Backend<T>> {
+    nodes: Mutex<Vec<Node<T, B>>>,
 }
 
-impl<T: DType> Tape<T> {
+impl<T: DType, B: Backend<T>> Tape<T, B> {
     pub fn new() -> Self {
         Tape { nodes: Mutex::new(Vec::new()) }
     }
 
-    pub fn add_node(&self, node: Node<T>) -> NodeId {
+    pub fn add_node(&self, node: Node<T, B>) -> NodeId {
         let mut nodes = self.nodes.lock().expect("autograd tape mutex poisoned");
         let id = NodeId(nodes.len());
         nodes.push(node);
         id
     }
 
-    pub fn node(&self, id: NodeId) -> Option<Node<T>> {
+    pub fn node(&self, id: NodeId) -> Option<Node<T, B>> {
         self.nodes
             .lock()
             .ok()
             .and_then(|nodes| nodes.get(id.0).cloned())
     }
 
-    pub fn set_grad(&self, id: NodeId, grad: TensorStorage<T>) {
+    pub fn set_grad(&self, id: NodeId, grad: B::Storage) {
         let slot = self
             .nodes
             .lock()
@@ -92,7 +92,7 @@ impl<T: DType> Tape<T> {
         }
     }
 
-    pub fn grad(&self, id: NodeId) -> Option<TensorStorage<T>> {
+    pub fn grad(&self, id: NodeId) -> Option<B::Storage> {
         let slot = self
             .nodes
             .lock()

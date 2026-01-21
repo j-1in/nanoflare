@@ -8,7 +8,7 @@ use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::ops::OpType;
-use crate::storage::TensorStorage;
+use crate::storage::Storage as _;
 use crate::Result;
 
 macro_rules! impl_binary_op {
@@ -35,13 +35,13 @@ macro_rules! impl_binary_op {
 
 #[derive(Debug, Clone)]
 pub struct Tensor<T: DType, B: Backend<T>> {
-    storage:       TensorStorage<T>,
+    storage:       B::Storage,
     layout:        TensorLayout,
     backend:       Arc<B>,
     requires_grad: bool,
-    tape:          Option<Arc<Tape<T>>>,
+    tape:          Option<Arc<Tape<T, B>>>,
     node_id:       Option<NodeId>,
-    grad:          Option<Arc<Mutex<Option<TensorStorage<T>>>>>,
+    grad:          Option<Arc<Mutex<Option<B::Storage>>>>,
 }
 
 impl_binary_op!(
@@ -52,6 +52,14 @@ impl_binary_op!(
 );
 
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
+    pub fn i(&self, indices: &[usize]) -> Result<&T> {
+        let idx = self
+            .layout
+            .ravel_index(indices)
+            .expect("invalid index for tensor");
+        Ok(&self.storage.i(idx))
+    }
+
     /// Create a new tensor filled with zeros, given a specific layout and
     /// backend.
     pub fn zeros(layout: TensorLayout, backend: Arc<B>) -> Self {
@@ -84,7 +92,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         }
     }
 
-    pub fn requires_grad(mut self, tape: Arc<Tape<T>>) -> Self {
+    pub fn requires_grad(mut self, tape: Arc<Tape<T, B>>) -> Self {
         let grad_slot = Arc::new(Mutex::new(None));
         let node_id = tape.add_node(Node::new(
             OpType::Leaf,
@@ -108,7 +116,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     }
 
     /// Get a reference to the tensor's storage.
-    pub fn storage(&self) -> &TensorStorage<T> {
+    pub fn storage(&self) -> &B::Storage {
         &self.storage
     }
 
@@ -117,7 +125,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         &self.backend
     }
 
-    pub fn from_parts(storage: TensorStorage<T>, layout: TensorLayout, backend: Arc<B>) -> Self {
+    pub fn from_parts(storage: B::Storage, layout: TensorLayout, backend: Arc<B>) -> Self {
         Tensor {
             storage,
             layout,
@@ -432,14 +440,14 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     }
 }
 
-impl<T: DType, B: Backend<T>> Index<&[usize]> for Tensor<T, B> {
-    type Output = T;
+// impl<T: DType, B: Backend<T>> Index<&[usize]> for Tensor<T, B> {
+//     type Output = T;
 
-    fn index(&self, indices: &[usize]) -> &Self::Output {
-        let idx = self
-            .layout
-            .ravel_index(indices)
-            .expect("invalid index for tensor");
-        &self.storage[idx]
-    }
-}
+//     fn index(&self, indices: &[usize]) -> &Self::Output {
+//         let idx = self
+//             .layout
+//             .ravel_index(indices)
+//             .expect("invalid index for tensor");
+//         &self.storage[idx]
+//     }
+// }

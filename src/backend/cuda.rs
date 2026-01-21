@@ -4,45 +4,47 @@ use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 
 use super::Backend;
-use crate::Result;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
-use crate::storage::{CudaStorage, TensorStorage};
+use crate::storage::CudaStorage;
 use crate::tensor::Tensor;
+use crate::Result;
 
 #[derive(Debug, Clone)]
 pub struct CudaBackend;
 
 impl<T: DType> Backend<T> for CudaBackend {
-    fn store_zeros(&self, layout: &TensorLayout) -> TensorStorage<T> {
+    type Storage = CudaStorage<T>;
+
+    fn store_zeros(&self, layout: &TensorLayout) -> Self::Storage {
         unimplemented!()
     }
 
-    fn store_ones(&self, layout: &TensorLayout) -> TensorStorage<T> {
+    fn store_ones(&self, layout: &TensorLayout) -> Self::Storage {
         unimplemented!()
     }
 
-    fn from_vec(&self, data: Vec<T>) -> TensorStorage<T> {
+    fn from_vec(&self, data: Vec<T>) -> Self::Storage {
         unimplemented!()
     }
 
-    fn add<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         unimplemented!()
     }
 
-    fn sub<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         unimplemented!()
     }
 
-    fn mul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         unimplemented!()
     }
 
-    fn div<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         unimplemented!()
     }
 
-    fn matmul<B: Backend<T>>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>> {
+    fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         unimplemented!()
     }
 }
