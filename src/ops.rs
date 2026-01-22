@@ -32,6 +32,27 @@ impl OpType {
     {
         match self {
             OpType::Add | OpType::Sub | OpType::Mul | OpType::Div => shapes_match(a, b),
+            OpType::MatMul => {
+                if a.layout().shape().len() < 2 || b.layout().shape().len() < 2 {
+                    return Err(crate::Error::MatMulInvalidShape {
+                        a_shape: a.layout().shape().clone(),
+                        b_shape: b.layout().shape().clone(),
+                    });
+                }
+
+                let a_last = *a.layout().shape().into_iter().last().unwrap();
+                let b_second_last = *b.layout().shape().into_iter().rev().nth(1).unwrap();
+
+                if a_last != b_second_last {
+                    return Err(crate::Error::MatMulDimensionMismatch {
+                        a_last,
+                        b_second_last,
+                        a_shape: a.layout().shape().clone(),
+                        b_shape: b.layout().shape().clone(),
+                    });
+                }
+                Ok(())
+            }
             _ => Ok(()),
         }
     }

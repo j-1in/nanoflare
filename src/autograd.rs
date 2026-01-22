@@ -1,40 +1,26 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::ops::OpType;
+use crate::Tensor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
 
 #[derive(Debug, Clone)]
 pub struct Node<T: DType, B: Backend<T>> {
-    op:            OpType,
-    parents:       Vec<NodeId>,
-    requires_grad: bool,
-    layout:        TensorLayout,
-    value:         B::Storage,
-    grad_slot:     Option<Arc<Mutex<Option<B::Storage>>>>,
+    op:      OpType,
+    parents: Vec<NodeId>,
+    layout:  TensorLayout,
+    value:   B::Storage,
 }
 
 impl<T: DType, B: Backend<T>> Node<T, B> {
-    pub fn new(
-        op: OpType,
-        parents: Vec<NodeId>,
-        requires_grad: bool,
-        layout: TensorLayout,
-        value: B::Storage,
-        grad_slot: Option<Arc<Mutex<Option<B::Storage>>>>,
-    ) -> Self {
-        Node {
-            op,
-            parents,
-            requires_grad,
-            layout,
-            value,
-            grad_slot,
-        }
+    pub fn new(op: OpType, parents: Vec<NodeId>, layout: TensorLayout, value: B::Storage) -> Self {
+        Node { op, parents, layout, value }
     }
 
     pub fn parents(&self) -> &Vec<NodeId> {
@@ -78,35 +64,29 @@ impl<T: DType, B: Backend<T>> Tape<T, B> {
             .and_then(|nodes| nodes.get(id.0).cloned())
     }
 
-    pub fn set_grad(&self, id: NodeId, grad: B::Storage) {
-        let slot = self
-            .nodes
-            .lock()
-            .ok()
-            .and_then(|nodes| nodes.get(id.0).and_then(|node| node.grad_slot.clone()));
-
-        if let Some(slot) = slot {
-            if let Ok(mut guard) = slot.lock() {
-                *guard = Some(grad);
-            }
-        }
-    }
-
-    pub fn grad(&self, id: NodeId) -> Option<B::Storage> {
-        let slot = self
-            .nodes
-            .lock()
-            .ok()
-            .and_then(|nodes| nodes.get(id.0).and_then(|node| node.grad_slot.clone()));
-
-        slot.and_then(|slot| slot.lock().ok().and_then(|g| g.clone()))
-    }
-
     pub fn len(&self) -> usize {
         self.nodes.lock().map(|nodes| nodes.len()).unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+pub struct Gradients<T: DType, B: Backend<T>> {
+    map: HashMap<NodeId, Tensor<T, B>>,
+}
+
+impl<T: DType, B: Backend<T>> Gradients<T, B> {
+    pub fn new() -> Self {
+        Gradients { map: HashMap::new() }
+    }
+
+    pub fn new_from_map(map: HashMap<NodeId, Tensor<T, B>>) -> Self {
+        Gradients { map }
+    }
+
+    pub fn get(&self, tensor: &Tensor<T, B>) -> Option<&Tensor<T, B>> {
+        tensor.node_id().and_then(|id| self.map.get(&id))
     }
 }

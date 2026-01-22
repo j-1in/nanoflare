@@ -3,8 +3,6 @@ use std::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToIncl
 #[derive(Debug, Clone, Copy)]
 pub struct Rest;
 
-pub const REST: TensorIndex = TensorIndex::Rest;
-
 #[derive(Debug, Clone, Copy)]
 pub enum TensorIndex {
     Single(usize),

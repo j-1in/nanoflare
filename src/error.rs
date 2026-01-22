@@ -45,6 +45,16 @@ pub enum Error {
     InvalidSkipStep {
         step: usize,
     },
+    MatMulInvalidShape {
+        a_shape: TensorShape,
+        b_shape: TensorShape,
+    },
+    MatMulDimensionMismatch {
+        a_last:        usize,
+        b_second_last: usize,
+        a_shape:       TensorShape,
+        b_shape:       TensorShape,
+    },
 }
 
 impl fmt::Display for Error {
@@ -98,6 +108,19 @@ impl fmt::Display for Error {
             }
             Error::InvalidSkipStep { step } => {
                 write!(f, "invalid skip step of {}", step)
+            }
+            Error::MatMulDimensionMismatch {
+                a_last,
+                b_second_last,
+                a_shape,
+                b_shape,
+            } => {
+                write!(
+                    f,
+                    "matmul dimension mismatch: a last dimension {} (shape {:?}) does not match b \
+                     second last dimension {} (shape {:?})",
+                    a_last, a_shape, b_second_last, b_shape
+                )
             }
         }
     }

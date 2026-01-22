@@ -30,39 +30,34 @@ impl<T: DType> Backend<T> for CpuBackend {
 
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         if a.layout().is_contiguous() && b.layout().is_contiguous() {
-            let a_offset = a.layout().offset();
-            let b_offset = b.layout().offset();
-            let numel = a.layout().shape().numel();
-
-            let a_slice = &a.storage().as_slice()[a_offset..a_offset + numel];
-            let b_slice = &b.storage().as_slice()[b_offset..b_offset + numel];
-
-            let data: Vec<T> = a_slice
-                .iter()
-                .zip(b_slice.iter())
-                .map(|(&x, &y)| x + y)
-                .collect();
-
-            return Ok(Tensor::from_parts(
-                self.from_vec(data),
-                a.layout().clone(),
-                a.backend().clone(),
-            ));
+            return self.contiguous_binary_op(a, b, |x, y| x + y);
         }
 
         self.strided_binary_op(a, b, |x, y| x + y)
     }
 
     fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
+        if a.layout().is_contiguous() && b.layout().is_contiguous() {
+            return self.contiguous_binary_op(a, b, |x, y| x - y);
+        }
+
+        self.strided_binary_op(a, b, |x, y| x - y)
     }
 
     fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
+        if a.layout().is_contiguous() && b.layout().is_contiguous() {
+            return self.contiguous_binary_op(a, b, |x, y| x * y);
+        }
+
+        self.strided_binary_op(a, b, |x, y| x * y)
     }
 
     fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
+        if a.layout().is_contiguous() && b.layout().is_contiguous() {
+            return self.contiguous_binary_op(a, b, |x, y| x / y);
+        }
+
+        self.strided_binary_op(a, b, |x, y| x / y)
     }
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
@@ -75,6 +70,49 @@ impl CpuBackend {
         CpuBackend
     }
 
+    /// Get slices for a pair of contiguous tensors
+    fn contiguous_slices<'a, T: DType>(
+        &self,
+        a: &'a Tensor<T, Self>,
+        b: &'a Tensor<T, Self>,
+    ) -> (&'a [T], &'a [T]) {
+        let a_offset = a.layout().offset();
+        let b_offset = b.layout().offset();
+        let numel = a.layout().shape().numel();
+
+        let a_slice = &a.storage().as_slice()[a_offset..a_offset + numel];
+        let b_slice = &b.storage().as_slice()[b_offset..b_offset + numel];
+
+        (a_slice, b_slice)
+    }
+
+    /// Perform binary operation on contiguous tensors
+    fn contiguous_binary_op<T, F>(
+        &self,
+        a: &Tensor<T, Self>,
+        b: &Tensor<T, Self>,
+        op: F,
+    ) -> Result<Tensor<T, Self>>
+    where
+        T: DType,
+        F: Fn(T, T) -> T + Sync + Send,
+    {
+        let (a_slice, b_slice) = self.contiguous_slices(a, b);
+
+        let data: Vec<T> = a_slice
+            .iter()
+            .zip(b_slice.iter())
+            .map(|(&x, &y)| op(x, y))
+            .collect();
+
+        Ok(Tensor::from_parts(
+            self.from_vec(data),
+            a.layout().clone(),
+            a.backend().clone(),
+        ))
+    }
+
+    /// Perform binary operation on strided tensors
     fn strided_binary_op<T, F>(
         &self,
         a: &Tensor<T, Self>,

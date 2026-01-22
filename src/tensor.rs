@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Add, Div, Mul, RangeInclusive, Sub};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use crate::autograd::{Node, NodeId, Tape};
+use crate::autograd::{Gradients, Node, NodeId, Tape};
 use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::index::TensorIndex;
@@ -41,7 +41,6 @@ pub struct Tensor<T: DType, B: Backend<T>> {
     requires_grad: bool,
     tape:          Option<Arc<Tape<T, B>>>,
     node_id:       Option<NodeId>,
-    grad:          Option<Arc<Mutex<Option<B::Storage>>>>,
 }
 
 impl_binary_op!(
@@ -64,7 +63,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: false,
             tape: None,
             node_id: None,
-            grad: None,
         }
     }
 
@@ -80,7 +78,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: false,
             tape: None,
             node_id: None,
-            grad: None,
         }
     }
 
@@ -93,25 +90,20 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: false,
             tape: None,
             node_id: None,
-            grad: None,
         }
     }
 
     pub fn requires_grad(mut self, tape: Arc<Tape<T, B>>) -> Self {
-        let grad_slot = Arc::new(Mutex::new(None));
         let node_id = tape.add_node(Node::new(
             OpType::Leaf,
             Vec::new(),
-            true,
             self.layout.clone(),
             self.storage.clone(),
-            Some(grad_slot.clone()),
         ));
 
         self.requires_grad = true;
         self.tape = Some(tape);
         self.node_id = Some(node_id);
-        self.grad = Some(grad_slot);
         self
     }
 
@@ -128,6 +120,11 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     /// Get a reference to the tensor's backend.
     pub fn backend(&self) -> &Arc<B> {
         &self.backend
+    }
+
+    /// Get the node ID associated with this tensor in the autograd tape.
+    pub fn node_id(&self) -> Option<NodeId> {
+        self.node_id
     }
 
     /// Get some element(s) from the tensor by specifying indices or slices.
@@ -165,7 +162,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: self.requires_grad,
             tape: self.tape.clone(),
             node_id: self.node_id,
-            grad: self.grad.clone(),
         })
     }
 
@@ -196,10 +192,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 tape.add_node(Node::new(
                     OpType::Leaf,
                     Vec::new(),
-                    self.requires_grad,
                     self.layout.clone(),
                     self.storage.clone(),
-                    self.grad.clone(),
                 ))
             });
 
@@ -207,38 +201,32 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 tape.add_node(Node::new(
                     OpType::Leaf,
                     Vec::new(),
-                    self.requires_grad,
-                    self.layout.clone(),
-                    self.storage.clone(),
-                    self.grad.clone(),
+                    rhs.layout.clone(),
+                    rhs.storage.clone(),
                 ))
             });
 
-            let out_grad = Arc::new(Mutex::new(None));
             let out_id = tape.add_node(Node::new(
                 op,
                 vec![left_id, right_id],
-                needs_grad,
                 out.layout.clone(),
                 out.storage.clone(),
-                Some(out_grad.clone()),
             ));
 
             out.tape = Some(tape);
             out.node_id = Some(out_id);
-            out.grad = Some(out_grad);
         }
 
         Ok(out)
     }
 
-    pub fn backward(&self) -> Result<()> {
+    pub fn backward(&self) -> Result<Gradients<T, B>> {
         if !self.requires_grad {
-            return Ok(());
+            return Ok(Gradients::new());
         }
 
         let (Some(tape), Some(root_id)) = (&self.tape, self.node_id) else {
-            return Ok(());
+            return Ok(Gradients::new());
         };
 
         let mut stack = vec![root_id];
@@ -288,7 +276,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 None => continue,
             };
 
-            tape.set_grad(id, grad.storage.clone());
+            // tape.set_grad(id, grad.storage.clone());
 
             match node.op() {
                 OpType::Leaf => continue,
@@ -355,7 +343,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             }
         }
 
-        Ok(())
+        Ok(Gradients::new_from_map(grads))
     }
 
     // TODO: avoid unnecessary clone
@@ -374,7 +362,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: self.requires_grad,
             tape: self.tape.clone(),
             node_id: self.node_id,
-            grad: self.grad.clone(),
         })
     }
 
@@ -392,7 +379,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: self.requires_grad,
             tape: self.tape.clone(),
             node_id: self.node_id,
-            grad: self.grad.clone(),
         })
     }
 
@@ -410,7 +396,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: self.requires_grad,
             tape: self.tape.clone(),
             node_id: self.node_id,
-            grad: self.grad.clone(),
         })
     }
 
@@ -428,7 +413,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 requires_grad: self.requires_grad,
                 tape: self.tape.clone(),
                 node_id: self.node_id,
-                grad: self.grad.clone(),
             })
         } else {
             todo!("non-contiguous reshape not implemented yet")
@@ -449,7 +433,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: self.requires_grad,
             tape: self.tape.clone(),
             node_id: self.node_id,
-            grad: self.grad.clone(),
         })
     }
 
@@ -467,7 +450,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: self.requires_grad,
             tape: self.tape.clone(),
             node_id: self.node_id,
-            grad: self.grad.clone(),
         })
     }
 }
