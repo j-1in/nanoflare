@@ -12,7 +12,7 @@ pub trait TensorOp<T: DType, B: Backend<T>>: Debug + Send + Sync {
     // FIXME
     fn backward(
         &self,
-        inputs: &[&Tensor<T, B>],
+        inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>>;
@@ -40,14 +40,17 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for AddOp {
 
     fn backward(
         &self,
-        inputs: &[&Tensor<T, B>],
+        _inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
-        backend: &Arc<B>,
+        _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        // let lhs_grad = grad.sum_to_shape(&self.lhs_orig_shape, backend)?;
-        // let rhs_grad = grad.sum_to_shape(&self.rhs_orig_shape, backend)?;
-        // Ok(vec![lhs_grad, rhs_grad])
-        todo!()
+        let grad_a = grad.clone();
+        let grad_b = grad.clone();
+
+        // TODO: Handle broadcasting by summing gradients to match orig_shape
+        // if self.lhs_orig_shape != grad.layout().shape() { ... }
+
+        Ok(vec![grad_a, grad_b])
     }
 
     fn to_optype(&self) -> OpType {
@@ -83,14 +86,17 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for SubOp {
 
     fn backward(
         &self,
-        inputs: &[&Tensor<T, B>],
+        _inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        // let lhs_grad = grad.sum_to_shape(&self.lhs_orig_shape, backend)?;
-        // let rhs_grad = grad.sum_to_shape(&self.rhs_orig_shape, backend)?;
-        // Ok(vec![lhs_grad, rhs_grad])
-        todo!()
+        let grad_a = grad.clone();
+
+        let zero = Tensor::zeros(grad.layout().clone(), backend.clone());
+        let grad_b = (&zero - grad)?;
+
+        // TODO: Handle broadcasting
+        Ok(vec![grad_a, grad_b])
     }
 
     fn to_optype(&self) -> OpType {
@@ -126,14 +132,18 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MulOp {
 
     fn backward(
         &self,
-        inputs: &[&Tensor<T, B>],
+        inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
-        backend: &Arc<B>,
+        _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        // let lhs_grad = grad.sum_to_shape(&self.lhs_orig_shape, backend)?;
-        // let rhs_grad = grad.sum_to_shape(&self.rhs_orig_shape, backend)?;
-        // Ok(vec![lhs_grad, rhs_grad])
-        todo!()
+        let a = &inputs[0];
+        let b = &inputs[1];
+
+        let grad_a = (grad * b)?;
+        let grad_b = (grad * a)?;
+
+        // TODO: handle broadcasting
+        Ok(vec![grad_a, grad_b])
     }
 
     fn to_optype(&self) -> OpType {
@@ -169,14 +179,25 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for DivOp {
 
     fn backward(
         &self,
-        inputs: &[&Tensor<T, B>],
+        inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        // let lhs_grad = grad.sum_to_shape(&self.lhs_orig_shape, backend)?;
-        // let rhs_grad = grad.sum_to_shape(&self.rhs_orig_shape, backend)?;
-        // Ok(vec![lhs_grad, rhs_grad])
-        todo!()
+        let a = &inputs[0];
+        let b = &inputs[1];
+
+        let grad_a = (grad / b)?;
+
+        let b_sq = (b * b)?;
+        let numerator = (grad * a)?;
+
+        let term = (&numerator / &b_sq)?;
+
+        let zero = Tensor::zeros(grad.layout().clone(), backend.clone());
+        let grad_b = (&zero - &term)?;
+
+        // TODO: handle broadcasting
+        Ok(vec![grad_a, grad_b])
     }
 
     fn to_optype(&self) -> OpType {
@@ -212,14 +233,11 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MatMulOp {
 
     fn backward(
         &self,
-        inputs: &[&Tensor<T, B>],
+        inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        // let lhs_grad = grad.sum_to_shape(&self.lhs_orig_shape, backend)?;
-        // let rhs_grad = grad.sum_to_shape(&self.rhs_orig_shape, backend)?;
-        // Ok(vec![lhs_grad, rhs_grad])
-        todo!()
+        todo!("MatMul backward not implemented yet")
     }
 
     fn to_optype(&self) -> OpType {
@@ -267,36 +285,20 @@ where
 }
 
 impl OpType {
-    // pub fn validate_binop<T, B>(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) ->
-    // Result<()> where
-    //     T: crate::dtype::DType,
-    //     B: crate::backend::Backend<T>,
-    // {
-    //     match self {
-    //         OpType::Add | OpType::Sub | OpType::Mul | OpType::Div =>
-    // shapes_match(a, b),         OpType::MatMul => {
-    //             if a.layout().shape().len() < 2 || b.layout().shape().len() < 2 {
-    //                 return Err(crate::Error::MatMulInvalidShape {
-    //                     a_shape: a.layout().shape().clone(),
-    //                     b_shape: b.layout().shape().clone(),
-    //                 });
-    //             }
-
-    //             let a_last = *a.layout().shape().into_iter().last().unwrap();
-    //             let b_second_last =
-    // *b.layout().shape().into_iter().rev().nth(1).unwrap();
-
-    //             if a_last != b_second_last {
-    //                 return Err(crate::Error::MatMulDimensionMismatch {
-    //                     a_last,
-    //                     b_second_last,
-    //                     a_shape: a.layout().shape().clone(),
-    //                     b_shape: b.layout().shape().clone(),
-    //                 });
-    //             }
-    //             Ok(())
-    //         }
-    //         _ => Ok(()),
-    //     }
-    // }
+    /// Delegates the backward pass to the specific operation implementation
+    pub fn backward<T: DType, B: Backend<T>>(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        match self {
+            OpType::Leaf => Ok(vec![]),
+            OpType::Add(op) => op.backward(inputs, grad, backend),
+            OpType::Sub(op) => op.backward(inputs, grad, backend),
+            OpType::Mul(op) => op.backward(inputs, grad, backend),
+            OpType::Div(op) => op.backward(inputs, grad, backend),
+            OpType::MatMul(op) => op.backward(inputs, grad, backend),
+        }
+    }
 }

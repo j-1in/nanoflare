@@ -285,72 +285,49 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
             // tape.set_grad(id, grad.storage.clone());
 
-            match node.op() {
-                OpType::Leaf => continue,
-                OpType::Add(_)
-                | OpType::Sub(_)
-                | OpType::Mul(_)
-                | OpType::Div(_)
-                | OpType::MatMul(_) => {
-                    if node.parents().len() != 2 {
-                        continue;
-                    }
+            // match node.op() {
+            //     OpType::Leaf => continue,
+            //     OpType::Add(_)
+            //     | OpType::Sub(_)
+            //     | OpType::Mul(_)
+            //     | OpType::Div(_)
+            //     | OpType::MatMul(_) => {
+            //         if node.parents().len() != 2 {
+            //             continue;
+            //         }
+            //     }
+            // }
+
+            if let OpType::Leaf = node.op() {
+                continue;
+            }
+
+            let mut inputs = Vec::new();
+            for parent_id in node.parents() {
+                if let Some(parent_node) = tape.node(*parent_id) {
+                    inputs.push(Tensor::from_parts(
+                        parent_node.value().clone(),
+                        parent_node.layout().clone(),
+                        self.backend.clone(),
+                    ));
                 }
             }
 
-            let left = match tape.node(node.parents()[0]) {
-                Some(n) => n,
-                None => continue,
-            };
+            let input_grads = node
+                .op()
+                .backward(inputs.as_slice(), &grad, &self.backend)?;
 
-            let right = match tape.node(node.parents()[1]) {
-                Some(n) => n,
-                None => continue,
-            };
+            if input_grads.len() != node.parents().len() {
+                panic!(
+                    "Op {:?} returned {} gradients but has {} parents",
+                    node.op(),
+                    input_grads.len(),
+                    node.parents().len()
+                );
+            }
 
-            let a = Tensor::from_parts(
-                left.value().clone(),
-                left.layout().clone(),
-                self.backend.clone(),
-            );
-
-            let b = Tensor::from_parts(
-                right.value().clone(),
-                right.layout().clone(),
-                self.backend.clone(),
-            );
-
-            match node.op() {
-                OpType::Add(add_op) => {
-                    add_grad(&mut grads, node.parents()[0], grad.clone());
-                    add_grad(&mut grads, node.parents()[1], grad);
-                }
-                OpType::Sub(sub_op) => {
-                    add_grad(&mut grads, node.parents()[0], grad.clone());
-                    let neg = (Tensor::zeros(node.layout().clone(), self.backend.clone()) - grad)
-                        .expect("backward subtraction: negation failed");
-                    add_grad(&mut grads, node.parents()[1], neg);
-                }
-                OpType::Mul(mul_op) => {
-                    let ga = (&grad * &b).expect("backward multiplication: left grad failed");
-                    let gb = (&grad * &a).expect("backward multiplication: right grad failed");
-                    add_grad(&mut grads, node.parents()[0], ga);
-                    add_grad(&mut grads, node.parents()[1], gb);
-                }
-                OpType::Div(div_op) => {
-                    let ga = (&grad / &b).expect("backward division: left grad failed");
-                    let b_sq = (&b * &b).expect("backward division: b squared failed");
-                    let gb = (&grad * &a).expect("backward division: right grad failed");
-                    let gb = (&gb / &b_sq).expect("backward division: right grad div failed");
-                    let neg = (Tensor::zeros(node.layout().clone(), self.backend.clone()) - gb)
-                        .expect("backward division: right grad negation failed");
-                    add_grad(&mut grads, node.parents()[0], ga);
-                    add_grad(&mut grads, node.parents()[1], neg);
-                }
-                OpType::MatMul(matmul_op) => {
-                    // TODO
-                }
-                OpType::Leaf => {}
+            for (i, parent_grad) in input_grads.into_iter().enumerate() {
+                add_grad(&mut grads, node.parents()[i], parent_grad);
             }
         }
 
