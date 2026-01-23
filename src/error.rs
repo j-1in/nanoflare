@@ -109,6 +109,14 @@ impl fmt::Display for Error {
             Error::InvalidSkipStep { step } => {
                 write!(f, "invalid skip step of {}", step)
             }
+            Error::MatMulInvalidShape { a_shape, b_shape } => {
+                // FIXME
+                write!(
+                    f,
+                    "matmul invalid shape: a shape {:?}, b shape {:?} (both must have rank >= 2)",
+                    a_shape, b_shape
+                )
+            }
             Error::MatMulDimensionMismatch {
                 a_last,
                 b_second_last,

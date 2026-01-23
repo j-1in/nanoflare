@@ -8,7 +8,7 @@ use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::index::TensorIndex;
 use crate::layout::TensorLayout;
-use crate::ops::OpType;
+use crate::ops::{AddOp, BinaryOp, DivOp, MulOp, OpType, SubOp};
 use crate::Result;
 
 macro_rules! impl_binary_op {
@@ -18,7 +18,10 @@ macro_rules! impl_binary_op {
             impl<T:DType, B: Backend<T>> $trait for Tensor<T, B> {
                 type Output = Result<Self>;
                 fn $method(self, rhs: Self) -> Self::Output {
-                    self.binary_op(&rhs, $op, |backend, a, b| backend.$method(a, b))
+                    match $op(&self, &rhs) {
+                        Ok(op) => self.binary_op(&rhs, op, |backend, a, b| backend.$method(a,b)),
+                        Err(e) => Err(e),
+                    }
                 }
             }
 
@@ -26,7 +29,10 @@ macro_rules! impl_binary_op {
             impl<'a, 'b, T:DType, B: Backend<T>> $trait<&'b Tensor<T, B>> for &'a Tensor<T, B> {
                 type Output = Result<Tensor<T, B>>;
                 fn $method(self, rhs: &'b Tensor<T, B>) -> Self::Output {
-                    self.binary_op(rhs, $op, |backend, a, b| backend.$method(a,b))
+                    match $op(self, rhs) {
+                        Ok(op) => self.binary_op(rhs, op, |backend, a, b| backend.$method(a,b)),
+                        Err(e) => Err(e),
+                    }
                 }
             }
         )*
@@ -44,10 +50,10 @@ pub struct Tensor<T: DType, B: Backend<T>> {
 }
 
 impl_binary_op!(
-    Add, add, OpType::Add;
-    Sub, sub, OpType::Sub;
-    Mul, mul, OpType::Mul;
-    Div, div, OpType::Div;
+    Add, add, AddOp::new;
+    Sub, sub, SubOp::new;
+    Mul, mul, MulOp::new;
+    Div, div, DivOp::new;
 );
 
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
@@ -165,12 +171,11 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         })
     }
 
-    fn binary_op<F>(&self, rhs: &Tensor<T, B>, op: OpType, f: F) -> Result<Self>
+    fn binary_op<O, F>(&self, rhs: &Tensor<T, B>, op: O, f: F) -> Result<Self>
     where
+        O: BinaryOp<T, B> + 'static,
         F: FnOnce(&B, &Tensor<T, B>, &Tensor<T, B>) -> Result<Tensor<T, B>>,
     {
-        op.validate_binop(self, rhs)?;
-
         let mut out = f(&self.backend, self, rhs)?;
 
         let needs_grad = self.requires_grad || rhs.requires_grad;
@@ -207,7 +212,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             });
 
             let out_id = tape.add_node(Node::new(
-                op,
+                op.to_optype(),
                 vec![left_id, right_id],
                 out.layout.clone(),
                 out.storage.clone(),
@@ -225,10 +230,12 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             return Ok(Gradients::new());
         }
 
+        // Get the tape and root node ID, return empty gradients if missing
         let (Some(tape), Some(root_id)) = (&self.tape, self.node_id) else {
             return Ok(Gradients::new());
         };
 
+        //  Perform a depth-first traversal to determine the order of nodes
         let mut stack = vec![root_id];
         let mut visited = HashSet::new();
         let mut order = Vec::new();
@@ -280,7 +287,11 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
             match node.op() {
                 OpType::Leaf => continue,
-                OpType::Add | OpType::Sub | OpType::Mul | OpType::Div | OpType::MatMul => {
+                OpType::Add(_)
+                | OpType::Sub(_)
+                | OpType::Mul(_)
+                | OpType::Div(_)
+                | OpType::MatMul(_) => {
                     if node.parents().len() != 2 {
                         continue;
                     }
@@ -310,23 +321,23 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             );
 
             match node.op() {
-                OpType::Add => {
+                OpType::Add(add_op) => {
                     add_grad(&mut grads, node.parents()[0], grad.clone());
                     add_grad(&mut grads, node.parents()[1], grad);
                 }
-                OpType::Sub => {
+                OpType::Sub(sub_op) => {
                     add_grad(&mut grads, node.parents()[0], grad.clone());
                     let neg = (Tensor::zeros(node.layout().clone(), self.backend.clone()) - grad)
                         .expect("backward subtraction: negation failed");
                     add_grad(&mut grads, node.parents()[1], neg);
                 }
-                OpType::Mul => {
+                OpType::Mul(mul_op) => {
                     let ga = (&grad * &b).expect("backward multiplication: left grad failed");
                     let gb = (&grad * &a).expect("backward multiplication: right grad failed");
                     add_grad(&mut grads, node.parents()[0], ga);
                     add_grad(&mut grads, node.parents()[1], gb);
                 }
-                OpType::Div => {
+                OpType::Div(div_op) => {
                     let ga = (&grad / &b).expect("backward division: left grad failed");
                     let b_sq = (&b * &b).expect("backward division: b squared failed");
                     let gb = (&grad * &a).expect("backward division: right grad failed");
@@ -336,7 +347,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                     add_grad(&mut grads, node.parents()[0], ga);
                     add_grad(&mut grads, node.parents()[1], neg);
                 }
-                OpType::MatMul => {
+                OpType::MatMul(matmul_op) => {
                     // TODO
                 }
                 OpType::Leaf => {}

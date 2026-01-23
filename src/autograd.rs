@@ -27,8 +27,8 @@ impl<T: DType, B: Backend<T>> Node<T, B> {
         &self.parents
     }
 
-    pub fn op(&self) -> OpType {
-        self.op
+    pub fn op(&self) -> &OpType {
+        &self.op
     }
 
     pub fn value(&self) -> &B::Storage {
