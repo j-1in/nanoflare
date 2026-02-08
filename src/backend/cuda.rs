@@ -28,6 +28,10 @@ impl<T: DType> Backend<T> for CudaBackend {
         unimplemented!()
     }
 
+    fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        unimplemented!()
+    }
+
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         unimplemented!()
     }

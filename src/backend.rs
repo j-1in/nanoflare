@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::dtype::DType;
+use crate::dtype::{DType, FloatDType};
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use crate::tensor::Tensor;
@@ -18,6 +18,7 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
     fn from_vec(&self, data: Vec<T>) -> Self::Storage;
 
     // Tensor Operations
+    fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> where T: FloatDType;
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;

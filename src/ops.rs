@@ -2,14 +2,13 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::backend::Backend;
-use crate::dtype::DType;
+use crate::dtype::{DType, FloatDType};
 use crate::{Result, Tensor, TensorShape};
 
 pub trait TensorOp<T: DType, B: Backend<T>>: Debug + Send + Sync {
     /// Returns the name of the operation.
     fn name(&self) -> &str;
 
-    // FIXME
     fn backward(
         &self,
         inputs: &[Tensor<T, B>],
@@ -20,10 +19,55 @@ pub trait TensorOp<T: DType, B: Backend<T>>: Debug + Send + Sync {
     fn to_optype(&self) -> OpType;
 }
 
+pub trait UnaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
+    fn new(a: &Tensor<T, B>) -> Result<Self>
+    where
+        Self: Sized;
+
+    fn validate_shape(a: &Tensor<T, B>) -> Result<()>;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExpOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for ExpOp where T: FloatDType {
+    fn name(&self) -> &str {
+        "Exp"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = &inputs[0];
+        let exp_a = a.exp()?;
+        let grad_a = (grad * &exp_a)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Exp(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for ExpOp where T: FloatDType {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(ExpOp)
+    }
+
+    fn validate_shape(_a: &Tensor<T, B>) -> Result<()> {
+        Ok(())
+    }
+}
+
 pub trait BinaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self>
     where
         Self: Sized;
+
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>;
 }
 
@@ -263,6 +307,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum OpType {
     Leaf,
+    Exp(ExpOp),
     Add(AddOp),
     Sub(SubOp),
     Mul(MulOp),
@@ -286,7 +331,7 @@ where
 
 impl OpType {
     /// Delegates the backward pass to the specific operation implementation
-    pub fn backward<T: DType, B: Backend<T>>(
+    pub fn backward<T: FloatDType, B: Backend<T>>(
         &self,
         inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
@@ -294,6 +339,7 @@ impl OpType {
     ) -> Result<Vec<Tensor<T, B>>> {
         match self {
             OpType::Leaf => Ok(vec![]),
+            OpType::Exp(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
             OpType::Sub(op) => op.backward(inputs, grad, backend),
             OpType::Mul(op) => op.backward(inputs, grad, backend),

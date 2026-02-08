@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::Backend;
-use crate::dtype::DType;
+use crate::dtype::{DType, FloatDType};
 use crate::layout::TensorLayout;
 use crate::storage::CpuStorage;
 use crate::tensor::Tensor;
@@ -26,6 +26,14 @@ impl<T: DType> Backend<T> for CpuBackend {
 
     fn from_vec(&self, data: Vec<T>) -> Self::Storage {
         Arc::new(CpuStorage::new(data))
+    }
+
+    fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> where T: FloatDType {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| FloatDType::exp(x));
+        }
+
+        self.strided_unary_op(a, |x| FloatDType::exp(x))
     }
 
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
@@ -70,20 +78,70 @@ impl CpuBackend {
         CpuBackend
     }
 
-    /// Get slices for a pair of contiguous tensors
-    fn contiguous_slices<'a, T: DType>(
-        &self,
-        a: &'a Tensor<T, Self>,
-        b: &'a Tensor<T, Self>,
-    ) -> (&'a [T], &'a [T]) {
+    /// Get a contiguous slice from a tensor
+    fn contiguous_slice<'a, T: DType>(&self, a: &'a Tensor<T, Self>) -> &'a [T] {
         let a_offset = a.layout().offset();
-        let b_offset = b.layout().offset();
         let numel = a.layout().shape().numel();
 
-        let a_slice = &a.storage().as_slice()[a_offset..a_offset + numel];
-        let b_slice = &b.storage().as_slice()[b_offset..b_offset + numel];
+        &a.storage().as_slice()[a_offset..a_offset + numel]
+    }
 
-        (a_slice, b_slice)
+    /// Perform unary operation on contiguous tensor
+    fn contiguous_unary_op<T, F>(&self, a: &Tensor<T, Self>, op: F) -> Result<Tensor<T, Self>>
+    where
+        T: DType,
+        F: Fn(T) -> T + Sync + Send,
+    {
+        let a_slice = self.contiguous_slice(a);
+
+        let data: Vec<T> = a_slice.iter().map(|&x| op(x)).collect();
+
+        Ok(Tensor::from_parts(
+            self.from_vec(data),
+            a.layout().clone(),
+            a.backend().clone(),
+        ))
+    }
+
+    fn strided_unary_op<T, F>(&self, a: &Tensor<T, Self>, op: F) -> Result<Tensor<T, Self>>
+    where
+        T: DType,
+        F: Fn(T) -> T + Sync + Send,
+    {
+        let shape = a.layout().shape().as_slice();
+        let rank = shape.len();
+        let numel = a.layout().shape().numel();
+
+        let mut res = Vec::with_capacity(numel);
+
+        let a_storage = &a.storage()[..];
+        let mut a_ptr = a.layout().offset();
+
+        let mut idx = vec![0; rank];
+
+        for _ in 0..numel {
+            let val = op(a_storage[a_ptr]);
+            res.push(val);
+
+            for dim in (0..rank).rev() {
+                idx[dim] += 1;
+
+                if idx[dim] < shape[dim] {
+                    a_ptr += a.layout().strides()[dim];
+                    break;
+                } else {
+                    idx[dim] = 0;
+                    a_ptr -= a.layout().strides()[dim] * (shape[dim] - 1);
+                }
+            }
+        }
+
+        let res_layout = TensorLayout::new(shape.to_vec());
+        Ok(Tensor::from_parts(
+            self.from_vec(res),
+            res_layout,
+            a.backend().clone(),
+        ))
     }
 
     /// Perform binary operation on contiguous tensors
@@ -97,7 +155,8 @@ impl CpuBackend {
         T: DType,
         F: Fn(T, T) -> T + Sync + Send,
     {
-        let (a_slice, b_slice) = self.contiguous_slices(a, b);
+        let a_slice = self.contiguous_slice(a);
+        let b_slice = self.contiguous_slice(b);
 
         let data: Vec<T> = a_slice
             .iter()

@@ -5,32 +5,66 @@ use std::sync::Arc;
 
 use crate::autograd::{Gradients, Node, NodeId, Tape};
 use crate::backend::Backend;
-use crate::dtype::DType;
+use crate::dtype::{DType, FloatDType};
 use crate::index::TensorIndex;
 use crate::layout::TensorLayout;
-use crate::ops::{AddOp, BinaryOp, DivOp, MulOp, OpType, SubOp};
+use crate::ops::*;
 use crate::Result;
 
 macro_rules! impl_binary_op {
+    // Trait-backed ops: "trait: Add, add, AddOp::new;"
+    (trait: $trait:ident, $method:ident, $op:expr; $($rest:tt)*) => {
+        // Owned implementation: a + b
+        impl<T: DType, B: Backend<T>> $trait for Tensor<T, B> {
+            type Output = Result<Self>;
+            fn $method(self, rhs: Self) -> Self::Output {
+                match $op(&self, &rhs) {
+                    Ok(op) => self.binary_op(&rhs, op, |backend, a, b| backend.$method(a,b)),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+
+        // Reference implementation: &a + &b
+        impl<'a, 'b, T:DType, B: Backend<T>> $trait<&'b Tensor<T, B>> for &'a Tensor<T, B> {
+            type Output = Result<Tensor<T, B>>;
+            fn $method(self, rhs: &'b Tensor<T, B>) -> Self::Output {
+                match $op(self, rhs) {
+                    Ok(op) => self.binary_op(rhs, op, |backend, a, b| backend.$method(a,b)),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+
+        impl_binary_op!($($rest)*);
+    };
+
+    // Plain-named ops: "fn: matmul, matmul, MatMulOp::new;"
+    (fn: $name:ident, $backend_method:ident, $op:expr; $($rest:tt)*) => {
+        impl<T: DType, B: Backend<T>> Tensor<T, B> {
+            pub fn $name(&self, rhs: &Tensor<T, B>) -> Result<Self> {
+                match $op(self, rhs) {
+                    Ok(op) => self.binary_op(rhs, op, |backend, a, b| backend.$backend_method(a, b)),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+
+        impl_binary_op!($($rest)*);
+    };
+
+    // termination
+    () => {};
+}
+
+macro_rules! impl_unary_op {
     ($($trait:ident, $method:ident, $op:expr);* $(;)?) => {
         $(
             // 1. Owned implementation: a + b
-            impl<T:DType, B: Backend<T>> $trait for Tensor<T, B> {
-                type Output = Result<Self>;
-                fn $method(self, rhs: Self) -> Self::Output {
-                    match $op(&self, &rhs) {
-                        Ok(op) => self.binary_op(&rhs, op, |backend, a, b| backend.$method(a,b)),
-                        Err(e) => Err(e),
-                    }
-                }
-            }
-
-            // 2. Reference implementation: &a + &b
-            impl<'a, 'b, T:DType, B: Backend<T>> $trait<&'b Tensor<T, B>> for &'a Tensor<T, B> {
-                type Output = Result<Tensor<T, B>>;
-                fn $method(self, rhs: &'b Tensor<T, B>) -> Self::Output {
-                    match $op(self, rhs) {
-                        Ok(op) => self.binary_op(rhs, op, |backend, a, b| backend.$method(a,b)),
+            impl<T:DType, B: Backend<T>> Tensor<T, B> {
+                pub fn $method(&self) -> Result<Self> {
+                    match $op(&self) {
+                        Ok(op) => self.unary_op(op, |backend, a| backend.$method(a)),
                         Err(e) => Err(e),
                     }
                 }
@@ -49,11 +83,27 @@ pub struct Tensor<T: DType, B: Backend<T>> {
     node_id:       Option<NodeId>,
 }
 
+impl_unary_op!();
+
+impl<T, B> Tensor<T, B>
+where
+    T: FloatDType,
+    B: Backend<T>,
+{
+    pub fn exp(&self) -> Result<Self> {
+        match ExpOp::new(&self) {
+            Ok(op) => self.unary_op(op, |backend, a| backend.exp(a)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 impl_binary_op!(
-    Add, add, AddOp::new;
-    Sub, sub, SubOp::new;
-    Mul, mul, MulOp::new;
-    Div, div, DivOp::new;
+    trait: Add, add, AddOp::new;
+    trait: Sub, sub, SubOp::new;
+    trait: Mul, mul, MulOp::new;
+    trait: Div, div, DivOp::new;
+    fn: matmul, matmul, MatMulOp::new;
 );
 
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
@@ -171,6 +221,46 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         })
     }
 
+    fn unary_op<O, F>(&self, op: O, f: F) -> Result<Self>
+    where
+        O: UnaryOp<T, B> + 'static,
+        F: FnOnce(&B, &Tensor<T, B>) -> Result<Tensor<T, B>>,
+    {
+        let mut out = f(&self.backend, self)?;
+
+        out.requires_grad = self.requires_grad;
+
+        if !self.requires_grad {
+            return Ok(out);
+        }
+
+        let tape = match &self.tape {
+            Some(tape) => tape.clone(),
+            None => return Ok(out),
+        };
+
+        let input_id = self.node_id.unwrap_or_else(|| {
+            tape.add_node(Node::new(
+                OpType::Leaf,
+                Vec::new(),
+                self.layout.clone(),
+                self.storage.clone(),
+            ))
+        });
+
+        let out_id = tape.add_node(Node::new(
+            op.to_optype(),
+            vec![input_id],
+            out.layout.clone(),
+            out.storage.clone(),
+        ));
+
+        out.tape = Some(tape);
+        out.node_id = Some(out_id);
+
+        Ok(out)
+    }
+
     fn binary_op<O, F>(&self, rhs: &Tensor<T, B>, op: O, f: F) -> Result<Self>
     where
         O: BinaryOp<T, B> + 'static,
@@ -225,7 +315,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         Ok(out)
     }
 
-    pub fn backward(&self) -> Result<Gradients<T, B>> {
+    pub fn backward(&self) -> Result<Gradients<T, B>>
+    where
+        T: FloatDType,
+    {
         if !self.requires_grad {
             return Ok(Gradients::new());
         }
@@ -282,21 +375,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 Some(n) => n,
                 None => continue,
             };
-
-            // tape.set_grad(id, grad.storage.clone());
-
-            // match node.op() {
-            //     OpType::Leaf => continue,
-            //     OpType::Add(_)
-            //     | OpType::Sub(_)
-            //     | OpType::Mul(_)
-            //     | OpType::Div(_)
-            //     | OpType::MatMul(_) => {
-            //         if node.parents().len() != 2 {
-            //             continue;
-            //         }
-            //     }
-            // }
 
             if let OpType::Leaf = node.op() {
                 continue;
