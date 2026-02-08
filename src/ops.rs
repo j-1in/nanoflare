@@ -69,6 +69,48 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for LogOp
+where
+    T: FloatDType,
+{
+    fn name(&self) -> &str {
+        "Log"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = &inputs[0];
+        let log_a = a.log()?;
+        let grad_a = (grad / &log_a)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Log(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for LogOp
+where
+    T: FloatDType,
+{
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(LogOp)
+    }
+
+    fn validate_shape(_a: &Tensor<T, B>) -> Result<()> {
+        Ok(())
+    }
+}
+
 pub trait BinaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self>
     where
@@ -314,6 +356,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
 pub enum OpType {
     Leaf,
     Exp(ExpOp),
+    Log(LogOp),
     Add(AddOp),
     Sub(SubOp),
     Mul(MulOp),
@@ -346,6 +389,7 @@ impl OpType {
         match self {
             OpType::Leaf => Ok(vec![]),
             OpType::Exp(op) => op.backward(inputs, grad, backend),
+            OpType::Log(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
             OpType::Sub(op) => op.backward(inputs, grad, backend),
             OpType::Mul(op) => op.backward(inputs, grad, backend),

@@ -96,6 +96,13 @@ where
             Err(e) => Err(e),
         }
     }
+
+    pub fn log(&self) -> Result<Self> {
+        match LogOp::new(&self) {
+            Ok(op) => self.unary_op(op, |backend, a| backend.log(a)),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 impl_binary_op!(

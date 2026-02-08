@@ -29,6 +29,9 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType;
+    fn log(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType;
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;

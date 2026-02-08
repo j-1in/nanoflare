@@ -35,7 +35,6 @@ impl<T: DType> Backend<T> for CudaBackend {
         T: num_traits::ToPrimitive,
         U: num_traits::NumCast,
     {
-        let _ = a;
         Err(Error::UnsupportedOperation { op: "cast", backend: "cuda" })
     }
 
@@ -43,26 +42,33 @@ impl<T: DType> Backend<T> for CudaBackend {
     where
         T: FloatDType,
     {
-        unimplemented!()
+        Err(Error::UnsupportedOperation { op: "exp", backend: "cuda" })
+    }
+
+    fn log(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        Err(Error::UnsupportedOperation { op: "log", backend: "cuda" })
     }
 
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        unimplemented!()
+        Err(Error::UnsupportedOperation { op: "add", backend: "cuda" })
     }
 
     fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        unimplemented!()
+        Err(Error::UnsupportedOperation { op: "sub", backend: "cuda" })
     }
 
     fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        unimplemented!()
+        Err(Error::UnsupportedOperation { op: "mul", backend: "cuda" })
     }
 
     fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        unimplemented!()
+        Err(Error::UnsupportedOperation { op: "div", backend: "cuda" })
     }
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        unimplemented!()
+        Err(Error::UnsupportedOperation { op: "matmul", backend: "cuda" })
     }
 }

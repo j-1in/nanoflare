@@ -102,6 +102,17 @@ impl<T: DType> Backend<T> for CpuBackend {
         self.strided_unary_op(a, |x| FloatDType::exp(x))
     }
 
+    fn log(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| FloatDType::log(x));
+        }
+
+        self.strided_unary_op(a, |x| FloatDType::log(x))
+    }
+
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         if a.layout().is_contiguous() && b.layout().is_contiguous() {
             return self.contiguous_binary_op(a, b, |x, y| x + y);

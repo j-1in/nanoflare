@@ -33,16 +33,25 @@ dtype_trait_impl!(DType for u8 u16 u32 u64 i8 i16 i32 i64 f32 f64);
 
 pub trait FloatDType: DType + Float {
     fn exp(self) -> Self;
+    fn log(self) -> Self;
 }
 
 impl FloatDType for f32 {
     fn exp(self) -> Self {
         self.exp()
     }
+
+    fn log(self) -> Self {
+        self.ln()
+    }
 }
 
 impl FloatDType for f64 {
     fn exp(self) -> Self {
         self.exp()
+    }
+
+    fn log(self) -> Self {
+        self.ln()
     }
 }
