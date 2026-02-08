@@ -1,32 +1,32 @@
-# nanoflare
+* nanoflare
 
 A lightweight, educational tensor library for Rust with automatic differentiation support.
 
-## Overview
+** Overview
 
-`nanoflare` is designed to provide a clear and concise implementation of tensor operations and autograd mechanics. It currently supports CPU-based operations with a planned CUDA backend, making it suitable for learning about deep learning internals or for lightweight ML experimentation in Rust.
+~nanoflare~ is designed to provide a clear and concise implementation of tensor operations and autograd mechanics. It currently supports CPU-based operations with a planned CUDA backend, making it suitable for learning about deep learning internals or for lightweight ML experimentation in Rust.
 
-## Features
+** Features
 
-- **N-Dimensional Tensors**: Support for arbitrary tensor shapes and layouts.
-- **Automatic Differentiation**: Reverse-mode autograd (backpropagation) with a dynamic computational graph.
-- **Backend Abstraction**: Distinctive separation between tensor logic and hardware backends (CPU implemented, CUDA planned).
-- **Type Safety**: Leverages Rust's type system to ensure correctness for floating-point and integer operations.
+- *N-Dimensional Tensors*: Support for arbitrary tensor shapes and layouts.
+- *Automatic Differentiation*: Reverse-mode autograd (backpropagation) with a dynamic computational graph.
+- *Backend Abstraction*: Distinctive separation between tensor logic and hardware backends (CPU implemented, CUDA planned).
+- *Type Safety*: Leverages Rust's type system to ensure correctness for floating-point and integer operations.
 
-## Installation
+** Installation
 
-Add `nanoflare` to your `Cargo.toml`:
+Add ~nanoflare~ to your ~Cargo.toml~:
 
-```toml
+#+BEGIN_SRC toml
 [dependencies]
 nanoflare = { path = "." } # Adjust path or version as needed
-```
+#+END_SRC
 
-## Usage
+** Usage
 
-### Creating Tensors
+*** Creating Tensors
 
-```rust
+#+BEGIN_SRC rust
 use std::sync::Arc;
 use nanoflare::{CpuBackend, Tensor, TensorLayout};
 
@@ -39,13 +39,13 @@ fn main() {
     
     println!("{:#?}", tensor);
 }
-```
+#+END_SRC
 
-### Basic Operations
+*** Basic Operations
 
 Standard arithmetic operations are supported.
 
-```rust
+#+BEGIN_SRC rust
 use std::sync::Arc;
 use nanoflare::{CpuBackend, Tensor, TensorLayout};
 
@@ -56,13 +56,13 @@ let a = Tensor::<f32, CpuBackend>::ones(layout.clone(), backend.clone());
 let b = Tensor::<f32, CpuBackend>::ones(layout, backend);
 
 let c = (&a + &b).unwrap(); // Element-wise addition
-```
+#+END_SRC
 
-### Automatic Differentiation
+*** Automatic Differentiation
 
-`nanoflare` can track operations on tensors to compute gradients automatically.
+~nanoflare~ can track operations on tensors to compute gradients automatically.
 
-```rust
+#+BEGIN_SRC rust
 use std::sync::Arc;
 use nanoflare::{CpuBackend, Tensor, TensorLayout, Tape};
 
@@ -87,17 +87,21 @@ let gradients = d.backward().unwrap();
 if let Some(grad_a) = gradients.get(&a) {
     println!("Gradient for a: {:#?}", grad_a);
 }
-```
+#+END_SRC
 
-## Roadmap & Status
+** Roadmap & Status
 
 This project is currently in active development.
 
-- **CPU Backend**: Functional for basic element-wise operations (add, sub, mul, div, exp).
-- **CUDA Backend**: Structure in place, implementation planned.
-- **Matrix Multiplication**: Planned.
-- **Broadcasting**: Planned.
+See [[file:ROADMAP.org][ROADMAP]] for details.
 
-## License
+** License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [[file:LICENSE][LICENSE]] for details.
+
+# local variables:
+# eval: (flyspell-mode -1)
+# eval: (mixed-pitch-mode -1)
+# eval: (set-fill-column 120)
+# eval: (setq-local line-spacing 2)
+# end:

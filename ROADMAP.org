@@ -1,0 +1,54 @@
+* Roadmap & TODOs
+
+This document outlines the development plan for ~nanoflare~, a lightweight Rust deep learning library targeting high-performance CPU execution.
+
+*Goal:* Build a functional, educational deep learning library capable of enabling modern architecture experimentation (e.g., Transformers), primarily to learn Rust and machine learning.
+
+** Phase 1: Core Foundation [2/4]
+- [X] *Tensor Structure*: Strided layout implementation (~TensorLayout~) supporting arbitrary dimensions and slicing.
+- [X] *Backend Abstraction*: Trait-based design (~Backend<T>~) to separate logic from hardware implementation.
+- [-] *CPU Backend (Basic)*:
+    - [X] Contiguous and strided memory layout support.
+    - [X] Basic element-wise arithmetic (Add, Sub, Mul, Div).
+    - [X] Type casting.
+    - [-] Basic unary operations.
+        - [X] Exponentiation
+        - [ ] log
+        - [ ] Negation, absolute
+- [-] *Autograd Engine*:
+    - [X] Reverse-mode automatic differentiation (~Tape~, ~Node~, ~Gradients~).
+    - [X] Dynamic computational graph construction.
+    - [-] Gradient propagation for supported operations.
+
+** Phase 2: CPU Efficiency & Parallelism
+- [-] *Broadcasting*: Implement NumPy-style broadcasting for binary operations.
+- [-] *More operations*: more tensor operations:
+    - [ ] Matrix Multiplication
+- [ ] *rayon Integration*: Parallelize ~CpuBackend~ operations using ~rayon~ to utilize all CPU cores.
+- [ ] *Optimized Matrix Multiplication*: Implement tiling/blocking and parallelization for ~matmul~.
+- [ ] *Reliability*: Improve error handling coverage and unit tests for edge cases.
+
+** Phase 3: Neural Network Primitives
+- [ ] *Module System*: Design a ~Module~ trait for composable layers (parameter management, forward pass).
+- [ ] *Core Layers*: Linear (Dense), LayerNorm, Embedding.
+- [ ] *Training Utilities*:
+    - [ ] Common Loss functions (MSE, CrossEntropy).
+    - [ ] Optimizers (Adam, SGD).
+    - [ ] Weight initialization strategies.
+
+** Phase 4: Modern Architectures & Ecosystem
+- [ ] *Transformer Support*: Implement Attention mechanisms (SDPA, MHA) and FeedForward blocks.
+- [ ] *Data Pipeline*: Simple ~Dataset~ and ~DataLoader~ abstractions.
+- [ ] *Serialization*: Support for saving/loading model weights (e.g., ~safetensors~).
+
+** Future / Exploration
+- *Advanced Architectures*: implementations of LLaMA / ViT.
+- *GPU Backend*: CUDA or WGPU implementation once CPU backend is mature.
+- *JIT / Graph Optimization*: Operation fusion and graph-level optimizations.
+
+# local variables:
+# eval: (flyspell-mode -1)
+# eval: (mixed-pitch-mode -1)
+# eval: (set-fill-column 120)
+# eval: (setq-local line-spacing 2)
+# end:
