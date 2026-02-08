@@ -30,7 +30,10 @@ pub trait UnaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpOp;
 
-impl<T: DType, B: Backend<T>> TensorOp<T, B> for ExpOp where T: FloatDType {
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for ExpOp
+where
+    T: FloatDType,
+{
     fn name(&self) -> &str {
         "Exp"
     }
@@ -53,7 +56,10 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for ExpOp where T: FloatDType {
     }
 }
 
-impl<T: DType, B: Backend<T>> UnaryOp<T, B> for ExpOp where T: FloatDType {
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for ExpOp
+where
+    T: FloatDType,
+{
     fn new(_a: &Tensor<T, B>) -> Result<Self> {
         Ok(ExpOp)
     }

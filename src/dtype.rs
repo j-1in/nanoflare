@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Add, Div, Mul, Sub};
 
-use num_traits::{One, Zero, Float};
+use num_traits::{Float, One, Zero};
 
 // Ensure the arithmetic operators return the same concrete type T (Output =
 // Self).

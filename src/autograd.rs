@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::Tensor;
 use crate::backend::Backend;
 use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::ops::OpType;
-use crate::Tensor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);

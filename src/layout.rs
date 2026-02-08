@@ -239,8 +239,8 @@ impl TensorLayout {
     /// ```
     /// # Errors
     /// ```rust
-    /// use nanoflare::layout::TensorLayout;
     /// use nanoflare::Error;
+    /// use nanoflare::layout::TensorLayout;
     /// let layout = TensorLayout::new(vec![10, 4]);
     /// let err = layout.split(0, &[3, 4]).unwrap_err();
     /// match err {

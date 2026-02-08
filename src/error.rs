@@ -55,6 +55,17 @@ pub enum Error {
         a_shape:       TensorShape,
         b_shape:       TensorShape,
     },
+    DTypeCastFailed {
+        from: &'static str,
+        to:   &'static str,
+    },
+    RequiresGradUnsupported {
+        op: &'static str,
+    },
+    UnsupportedOperation {
+        op:      &'static str,
+        backend: &'static str,
+    },
 }
 
 impl fmt::Display for Error {
@@ -128,6 +139,23 @@ impl fmt::Display for Error {
                     "matmul dimension mismatch: a last dimension {} (shape {:?}) does not match b \
                      second last dimension {} (shape {:?})",
                     a_last, a_shape, b_second_last, b_shape
+                )
+            }
+            Error::DTypeCastFailed { from, to } => {
+                write!(f, "dtype cast failed: from {} to {}", from, to)
+            }
+            Error::RequiresGradUnsupported { op } => {
+                write!(
+                    f,
+                    "operation {} is not supported when requires_grad = true",
+                    op
+                )
+            }
+            Error::UnsupportedOperation { op, backend } => {
+                write!(
+                    f,
+                    "operation {} is not supported on backend {}",
+                    op, backend
                 )
             }
         }

@@ -9,7 +9,7 @@ use crate::dtype::{DType, FloatDType};
 use crate::index::TensorIndex;
 use crate::layout::TensorLayout;
 use crate::ops::*;
-use crate::Result;
+use crate::{Error, Result};
 
 macro_rules! impl_binary_op {
     // Trait-backed ops: "trait: Add, add, AddOp::new;"
@@ -149,6 +149,20 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         }
     }
 
+    pub fn cast<U>(&self) -> Result<Tensor<U, B>>
+    where
+        U: DType,
+        B: Backend<U>,
+        T: num_traits::ToPrimitive,
+        U: num_traits::NumCast,
+    {
+        if self.requires_grad {
+            return Err(Error::RequiresGradUnsupported { op: "cast" });
+        }
+
+        self.backend.cast::<U>(self)
+    }
+
     pub fn requires_grad(mut self, tape: Arc<Tape<T, B>>) -> Self {
         let node_id = tape.add_node(Node::new(
             OpType::Leaf,
@@ -190,8 +204,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     ///
     /// # Example
     /// ```rust
-    /// use nanoflare::backend::cpu::CpuBackend;
     /// use nanoflare::Tensor;
+    /// use nanoflare::backend::cpu::CpuBackend;
     ///
     /// let backend = std::sync::Arc::new(CpuBackend);
     /// let layout = nanoflare::TensorLayout::new(vec![2, 3]);
