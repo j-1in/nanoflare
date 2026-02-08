@@ -40,6 +40,7 @@ impl TensorLayout {
         self.view_from_expanded(&expanded)
     }
 
+    // Expand the indices, handling the `Rest` variant.
     fn expand_indices(&self, indices: &[TensorIndex]) -> Result<Vec<TensorIndex>> {
         let rank = self.shape.len();
 
@@ -92,6 +93,7 @@ impl TensorLayout {
         Ok(expanded)
     }
 
+    // Create a new view of the tensor based on the expanded indices.
     fn view_from_expanded(&self, expanded: &[TensorIndex]) -> Result<Self> {
         let rank = self.shape.len();
         if expanded.len() != rank {
