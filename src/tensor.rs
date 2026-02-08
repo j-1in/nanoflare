@@ -204,23 +204,24 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     ///
     /// # Example
     /// ```rust
-    /// use nanoflare::Tensor;
     /// use nanoflare::backend::cpu::CpuBackend;
+    /// use nanoflare::{Tensor, i};
     ///
     /// let backend = std::sync::Arc::new(CpuBackend);
     /// let layout = nanoflare::TensorLayout::new(vec![2, 3]);
     /// let tensor = Tensor::<f32, _>::ones(layout, backend);
     ///
     /// // Get a single element
-    /// let element = tensor.get([0, 1]);
+    /// let element = tensor.get(i![0, 1]);
     ///
     /// // Get a slice of the tensor
-    /// let slice = tensor.get([0..2, 1..3]);
+    /// let slice = tensor.get(i![0..2, 1..3]);
     ///
     /// // Get a sub-tensor
-    /// let sub_tensor = tensor.get([0..1, 0..2]);
+    /// let sub_tensor = tensor.get(i![0..1, 0..2]);
     ///
-    /// // Get
+    /// // Get a full tensor
+    /// let full = tensor.get(i![.., ..]);
     /// ```
     pub fn get<I: AsRef<[TensorIndex]>>(&self, indices: I) -> Result<Self> {
         let layout = self.layout.get(indices)?;

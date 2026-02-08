@@ -34,8 +34,121 @@ impl TensorLayout {
         }
     }
 
+    // Main entry point to index a tensor with a set of `TensorIndex` values.
     pub fn get<I: AsRef<[TensorIndex]>>(&self, indices: I) -> Result<Self> {
-        unimplemented!()
+        let expanded = self.expand_indices(indices.as_ref())?;
+        self.view_from_expanded(&expanded)
+    }
+
+    fn expand_indices(&self, indices: &[TensorIndex]) -> Result<Vec<TensorIndex>> {
+        let rank = self.shape.len();
+
+        let mut expanded = Vec::new();
+        let mut rest_used = false;
+
+        for idx in indices {
+            match idx {
+                TensorIndex::Rest => {
+                    if rest_used {
+                        return Err(Error::RankMismatch {
+                            expected: rank,
+                            got:      indices.len(),
+                        });
+                    }
+                    rest_used = true;
+
+                    let specified = indices.len().saturating_sub(1);
+                    if specified > rank {
+                        return Err(Error::RankMismatch {
+                            expected: rank,
+                            got:      indices.len(),
+                        });
+                    }
+
+                    let rest_len = rank - specified;
+                    expanded.extend(
+                        std::iter::repeat(TensorIndex::Slice { start: None, end: None })
+                            .take(rest_len),
+                    );
+                }
+                _ => expanded.push(*idx),
+            }
+        }
+
+        if !rest_used && indices.len() != rank {
+            return Err(Error::RankMismatch {
+                expected: rank,
+                got:      indices.len(),
+            });
+        }
+
+        if expanded.len() != rank {
+            return Err(Error::RankMismatch {
+                expected: rank,
+                got:      expanded.len(),
+            });
+        }
+
+        Ok(expanded)
+    }
+
+    fn view_from_expanded(&self, expanded: &[TensorIndex]) -> Result<Self> {
+        let rank = self.shape.len();
+        if expanded.len() != rank {
+            return Err(Error::RankMismatch {
+                expected: rank,
+                got:      expanded.len(),
+            });
+        }
+
+        let mut new_shape = Vec::with_capacity(rank);
+        let mut new_strides = Vec::with_capacity(rank);
+        let mut new_offset = self.offset;
+
+        for (axis, idx) in expanded.iter().enumerate() {
+            let dim = self.shape[axis];
+            let stride = self.strides[axis];
+
+            match idx {
+                TensorIndex::Single(index) => {
+                    if *index >= dim {
+                        return Err(Error::IndexOutOfBounds { axis, index: *index, dim });
+                    }
+
+                    new_offset += index * stride;
+                    new_shape.push(1);
+                    new_strides.push(stride);
+                }
+                TensorIndex::Slice { start, end } => {
+                    let s = start.unwrap_or(0);
+                    let e = end.unwrap_or(dim);
+
+                    if s > e || s > dim || e > dim {
+                        return Err(Error::IndexOutOfBounds {
+                            axis,
+                            index: if e > dim { e } else { s },
+                            dim,
+                        });
+                    }
+
+                    new_offset += s * stride;
+                    new_shape.push(e - s);
+                    new_strides.push(stride);
+                }
+                TensorIndex::Rest => {
+                    return Err(Error::RankMismatch {
+                        expected: rank,
+                        got:      expanded.len(),
+                    });
+                }
+            }
+        }
+
+        Ok(Self {
+            shape:   TensorShape::new(new_shape),
+            strides: new_strides,
+            offset:  new_offset,
+        })
     }
 
     pub fn compute_stride(shape: &[usize]) -> Vec<usize> {

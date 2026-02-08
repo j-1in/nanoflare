@@ -39,10 +39,10 @@ impl<T: DType> Backend<T> for CpuBackend {
         let to = std::any::type_name::<U>();
 
         if a.layout().is_contiguous() {
-            let a_slice = self.contiguous_slice(a);
+            let a_slice = self.contiguous_slice::<T>(a);
             let mut data = Vec::with_capacity(a_slice.len());
             for &x in a_slice {
-                let casted: Option<U> = num_traits::cast(x);
+                let casted: Option<U> = <U as num_traits::NumCast>::from(x);
                 let Some(value) = casted else {
                     return Err(Error::DTypeCastFailed { from, to });
                 };
@@ -67,7 +67,7 @@ impl<T: DType> Backend<T> for CpuBackend {
         let mut idx = vec![0; rank];
 
         for _ in 0..numel {
-            let casted: Option<U> = num_traits::cast(a_storage[a_ptr]);
+            let casted: Option<U> = <U as num_traits::NumCast>::from(a_storage[a_ptr]);
             let Some(value) = casted else {
                 return Err(Error::DTypeCastFailed { from, to });
             };
@@ -311,7 +311,7 @@ mod tests {
         let layout = TensorLayout::new(vec![2, 2]);
         let a = Tensor::<f32, CpuBackend>::ones(layout, backend);
         let out = a.exp().unwrap();
-        let expected = f32::consts::E;
+        let expected: f32 = std::f32::consts::E;
         for &v in out.storage().as_slice() {
             assert!((v - expected).abs() < 1e-6);
         }
