@@ -228,7 +228,7 @@ impl TensorLayout {
     ///   dimensions.
     ///
     /// # Returns
-    /// * A new `TensorLayout` with permuted shape and strides.
+    /// A new `TensorLayout` with permuted shape and strides.
     ///
     /// # Example
     /// ```rust
@@ -239,8 +239,8 @@ impl TensorLayout {
     /// ```
     ///
     /// # Errors
-    /// * Returns an error if `permuted_indices` is not a valid permutation of
-    ///   the tensor dimensions.
+    /// Returns an error if `permuted_indices` is not a valid permutation of
+    /// the tensor dimensions.
     pub fn permute(&self, permuted_indices: &[usize]) -> Result<Self> {
         let rank = self.shape.len();
 
@@ -494,6 +494,74 @@ impl TensorLayout {
         Ok(Self {
             shape:   TensorShape::new(shape.to_vec()),
             strides: Self::compute_stride(shape),
+            offset:  self.offset,
+        })
+    }
+
+    /// Broadcast the tensor layout to a new shape. Where broadcasted dimensions
+    /// will have stride 0 in the resulting layout.
+    ///
+    /// # Arguments
+    /// * `shape` - Any type implementing `AsRef<[usize]>` describing the target
+    ///   shape. The target shape must be broadcastable from the current shape.
+    ///
+    /// # Returns
+    /// A new `TensorLayout` with the requested shape and strides adjusted for
+    /// broadcasting.
+    ///
+    /// # Errors
+    /// Returns `Error::LayoutMismatch` if the target shape is not broadcastable
+    /// from the current shape.
+    pub fn broadcast_to(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
+        let out_shape = shape.as_ref();
+        let out_rank = out_shape.len();
+        let in_shape = self.shape.as_slice();
+        let in_rank = in_shape.len();
+
+        if out_rank < in_rank {
+            return Err(Error::LayoutMismatch {
+                a: self.shape.clone(),
+                b: TensorShape::new(out_shape.to_vec()),
+            });
+        }
+
+        let lead = out_rank - in_rank;
+        let mut new_shape = Vec::with_capacity(out_rank);
+        let mut new_strides = Vec::with_capacity(out_rank);
+
+        for i in 0..out_rank {
+            let out_dim = out_shape[i];
+            let in_dim_opt = if i >= lead {
+                Some(in_shape[i - lead])
+            } else {
+                None
+            };
+            let in_dim = in_dim_opt.unwrap_or(1);
+
+            if in_dim != out_dim && in_dim != 1 {
+                return Err(Error::LayoutMismatch {
+                    a: self.shape.clone(),
+                    b: TensorShape::new(out_shape.to_vec()),
+                });
+            }
+
+            let stride = if let Some(in_dim) = in_dim_opt {
+                if in_dim == 1 && out_dim != 1 {
+                    0
+                } else {
+                    self.strides[i - lead]
+                }
+            } else {
+                0
+            };
+
+            new_shape.push(out_dim);
+            new_strides.push(stride);
+        }
+
+        Ok(Self {
+            shape:   TensorShape::new(new_shape),
+            strides: new_strides,
             offset:  self.offset,
         })
     }

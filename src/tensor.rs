@@ -12,14 +12,19 @@ use crate::ops::*;
 use crate::{Error, Result};
 
 macro_rules! impl_binary_op {
-    // Trait-backed ops: "trait: Add, add, AddOp::new;"
-    (trait: $trait:ident, $method:ident, $op:expr; $($rest:tt)*) => {
+    // Trait-backed ops: "trait: Add, add, AddOp::new, true;"
+    (trait: $trait:ident, $method:ident, $op:expr, $broadcast:expr; $($rest:tt)*) => {
         // Owned implementation: a + b
         impl<T: DType, B: Backend<T>> $trait for Tensor<T, B> {
             type Output = Result<Self>;
             fn $method(self, rhs: Self) -> Self::Output {
                 match $op(&self, &rhs) {
-                    Ok(op) => self.binary_op(&rhs, op, |backend, a, b| backend.$method(a,b)),
+                    Ok(op) => self.binary_op(
+                        &rhs,
+                        op,
+                        |backend, a, b| backend.$method(a, b),
+                        $broadcast,
+                    ),
                     Err(e) => Err(e),
                 }
             }
@@ -30,7 +35,12 @@ macro_rules! impl_binary_op {
             type Output = Result<Tensor<T, B>>;
             fn $method(self, rhs: &'b Tensor<T, B>) -> Self::Output {
                 match $op(self, rhs) {
-                    Ok(op) => self.binary_op(rhs, op, |backend, a, b| backend.$method(a,b)),
+                    Ok(op) => self.binary_op(
+                        rhs,
+                        op,
+                        |backend, a, b| backend.$method(a, b),
+                        $broadcast,
+                    ),
                     Err(e) => Err(e),
                 }
             }
@@ -39,12 +49,17 @@ macro_rules! impl_binary_op {
         impl_binary_op!($($rest)*);
     };
 
-    // Plain-named ops: "fn: matmul, matmul, MatMulOp::new;"
-    (fn: $name:ident, $backend_method:ident, $op:expr; $($rest:tt)*) => {
+    // Plain-named ops: "fn: matmul, matmul, MatMulOp::new, false;"
+    (fn: $name:ident, $backend_method:ident, $op:expr, $broadcast:expr; $($rest:tt)*) => {
         impl<T: DType, B: Backend<T>> Tensor<T, B> {
             pub fn $name(&self, rhs: &Tensor<T, B>) -> Result<Self> {
                 match $op(self, rhs) {
-                    Ok(op) => self.binary_op(rhs, op, |backend, a, b| backend.$backend_method(a, b)),
+                    Ok(op) => self.binary_op(
+                        rhs,
+                        op,
+                        |backend, a, b| backend.$backend_method(a, b),
+                        $broadcast,
+                    ),
                     Err(e) => Err(e),
                 }
             }
@@ -106,11 +121,11 @@ where
 }
 
 impl_binary_op!(
-    trait: Add, add, AddOp::new;
-    trait: Sub, sub, SubOp::new;
-    trait: Mul, mul, MulOp::new;
-    trait: Div, div, DivOp::new;
-    fn: matmul, matmul, MatMulOp::new;
+    trait: Add, add, AddOp::new, true;
+    trait: Sub, sub, SubOp::new, true;
+    trait: Mul, mul, MulOp::new, true;
+    trait: Div, div, DivOp::new, true;
+    fn: matmul, matmul, MatMulOp::new, false;
 );
 
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
@@ -283,12 +298,19 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         Ok(out)
     }
 
-    fn binary_op<O, F>(&self, rhs: &Tensor<T, B>, op: O, f: F) -> Result<Self>
+    fn binary_op<O, F>(&self, rhs: &Tensor<T, B>, op: O, f: F, broadcast: bool) -> Result<Self>
     where
         O: BinaryOp<T, B> + 'static,
         F: FnOnce(&B, &Tensor<T, B>, &Tensor<T, B>) -> Result<Tensor<T, B>>,
     {
-        let mut out = f(&self.backend, self, rhs)?;
+        let mut out = if broadcast {
+            let out_shape = broadcasted_shape(self, rhs)?;
+            let a_view = self.broadcast_to(out_shape.as_slice())?;
+            let b_view = rhs.broadcast_to(out_shape.as_slice())?;
+            f(&self.backend, &a_view, &b_view)?
+        } else {
+            f(&self.backend, self, rhs)?
+        };
 
         let needs_grad = self.requires_grad || rhs.requires_grad;
         out.requires_grad = needs_grad;
@@ -505,6 +527,23 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         } else {
             todo!("non-contiguous reshape not implemented yet")
         }
+    }
+
+    /// Broadcast the tensor layout to a new shape.
+    ///
+    /// This is a view-only operation; it does not copy data.
+    /// This is a wrapper around `TensorLayout::broadcast_to`.
+    pub fn broadcast_to(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
+        let layout = self.layout.broadcast_to(shape)?;
+
+        Ok(Tensor {
+            layout,
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
+            requires_grad: self.requires_grad,
+            tape: self.tape.clone(),
+            node_id: self.node_id,
+        })
     }
 
     /// Slice the tensor along a single dimension, producing a sub-layout and

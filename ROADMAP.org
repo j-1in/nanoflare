@@ -13,7 +13,7 @@ This document outlines the development plan for ~nanoflare~, a lightweight Rust 
     - [X] Type casting.
     - [-] Basic unary operations.
         - [X] Exponentiation
-        - [ ] log
+        - [X] log
         - [ ] Negation, absolute
 - [-] *Autograd Engine*:
     - [X] Reverse-mode automatic differentiation (~Tape~, ~Node~, ~Gradients~).

@@ -5,10 +5,25 @@ use crate::backend::Backend;
 use crate::dtype::{DType, FloatDType};
 use crate::{Result, Tensor, TensorShape};
 
+/// A trait representing a tensor operation.
 pub trait TensorOp<T: DType, B: Backend<T>>: Debug + Send + Sync {
     /// Returns the name of the operation.
     fn name(&self) -> &str;
 
+    /// Computes the gradient of the operation with respect to its inputs.
+    ///
+    /// # Arguments
+    /// * `inputs` - A slice of tensors representing the original data used for
+    ///   the operation
+    /// * `grad` - The gradient of the output with respect to some scalar value
+    /// * `backend` - The backend to use for computation
+    ///
+    /// # Returns
+    /// A `Result` containing a vector of tensors representing the gradients
+    /// with respect to each input.
+    ///
+    /// # Errors
+    /// Returns an error if the gradient computation fails.
     fn backward(
         &self,
         inputs: &[Tensor<T, B>],
@@ -16,17 +31,30 @@ pub trait TensorOp<T: DType, B: Backend<T>>: Debug + Send + Sync {
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>>;
 
+    /// Converts the operation to its corresponding `OpType` and returns it.
     fn to_optype(&self) -> OpType;
 }
 
+/// A trait representing a unary tensor operation.
 pub trait UnaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
+    /// Creates a new instance of the unary operation.
+    ///
+    /// # Returns
+    /// A new instance of the unary operation.
     fn new(a: &Tensor<T, B>) -> Result<Self>
     where
         Self: Sized;
 
-    fn validate_shape(a: &Tensor<T, B>) -> Result<()>;
+    /// Validates the shape of the input tensor for the unary operation.
+    ///
+    /// # Returns
+    /// `Ok(())` if the shape is valid, `Err(Error)` otherwise.
+    fn validate_shape(_a: &Tensor<T, B>) -> Result<()> {
+        Ok(())
+    }
 }
 
+/// The exponential operation datatype.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpOp;
 
@@ -63,12 +91,9 @@ where
     fn new(_a: &Tensor<T, B>) -> Result<Self> {
         Ok(ExpOp)
     }
-
-    fn validate_shape(_a: &Tensor<T, B>) -> Result<()> {
-        Ok(())
-    }
 }
 
+/// The logarithm operation datatype, takes the natural logarithm of a tensor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogOp;
 
@@ -87,8 +112,7 @@ where
         _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
         let a = &inputs[0];
-        let log_a = a.log()?;
-        let grad_a = (grad / &log_a)?;
+        let grad_a = (grad / a)?;
 
         Ok(vec![grad_a])
     }
@@ -105,12 +129,9 @@ where
     fn new(_a: &Tensor<T, B>) -> Result<Self> {
         Ok(LogOp)
     }
-
-    fn validate_shape(_a: &Tensor<T, B>) -> Result<()> {
-        Ok(())
-    }
 }
 
+/// Trait representing a binary tensor operation.
 pub trait BinaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self>
     where
@@ -160,7 +181,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for AddOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?;
         Ok(())
     }
 }
@@ -206,7 +227,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for SubOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?; // TODO: implement broadcasting rules
         Ok(())
     }
 }
@@ -253,7 +274,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MulOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?; // TODO: implement broadcasting rules
         Ok(())
     }
 }
@@ -287,8 +308,8 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for DivOp {
 
         let zero = Tensor::zeros(grad.layout().clone(), backend.clone());
         let grad_b = (&zero - &term)?;
-
         // TODO: handle broadcasting
+
         Ok(vec![grad_a, grad_b])
     }
 
@@ -307,7 +328,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for DivOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?; // TODO: implement broadcasting rules
         Ok(())
     }
 }
@@ -364,18 +385,64 @@ pub enum OpType {
     MatMul(MatMulOp),
 }
 
-pub(crate) fn shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
+pub(crate) fn broadcasted_shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
 where
     T: crate::dtype::DType,
     B: crate::backend::Backend<T>,
 {
-    if a.layout().shape() != b.layout().shape() {
-        return Err(crate::Error::LayoutMismatch {
-            a: a.layout().shape().clone(),
-            b: b.layout().shape().clone(),
-        });
-    }
+    let _ = broadcasted_shape(a, b)?;
     Ok(())
+}
+
+/// Computes the broadcasted shape of two tensors, if they are compatible for
+/// broadcasting.
+pub(crate) fn broadcasted_shape<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<TensorShape>
+where
+    T: crate::dtype::DType,
+    B: crate::backend::Backend<T>,
+{
+    let shape_a = a.layout().shape();
+    let shape_b = b.layout().shape();
+
+    let rank_a = shape_a.len();
+    let rank_b = shape_b.len();
+
+    let max_rank = std::cmp::max(rank_a, rank_b);
+
+    let mut out_rev = Vec::with_capacity(max_rank);
+
+    for i in 0..max_rank {
+        let dim_a = if i < rank_a {
+            shape_a[rank_a - 1 - i]
+        } else {
+            1
+        };
+
+        let dim_b = if i < rank_b {
+            shape_b[rank_b - 1 - i]
+        } else {
+            1
+        };
+
+        if dim_a != dim_b && dim_a != 1 && dim_b != 1 {
+            return Err(crate::Error::LayoutMismatch {
+                a: a.layout().shape().clone(),
+                b: b.layout().shape().clone(),
+            });
+        }
+
+        let out_dim = if dim_a == dim_b {
+            dim_a
+        } else if dim_a == 1 {
+            dim_b
+        } else {
+            dim_a
+        };
+        out_rev.push(out_dim);
+    }
+
+    out_rev.reverse();
+    Ok(TensorShape::new(out_rev))
 }
 
 impl OpType {
