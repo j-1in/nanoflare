@@ -160,8 +160,7 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for AddOp {
         let grad_a = grad.clone();
         let grad_b = grad.clone();
 
-        // TODO: Handle broadcasting by summing gradients to match orig_shape
-        // if self.lhs_orig_shape != grad.layout().shape() { ... }
+        // TODO: Handle broadcasting
 
         Ok(vec![grad_a, grad_b])
     }
@@ -227,7 +226,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for SubOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        broadcasted_shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?;
         Ok(())
     }
 }
@@ -274,7 +273,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MulOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        broadcasted_shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?;
         Ok(())
     }
 }
@@ -328,7 +327,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for DivOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        broadcasted_shapes_match(a, b)?; // TODO: implement broadcasting rules
+        broadcasted_shapes_match(a, b)?;
         Ok(())
     }
 }
@@ -462,6 +461,36 @@ impl OpType {
             OpType::Mul(op) => op.backward(inputs, grad, backend),
             OpType::Div(op) => op.backward(inputs, grad, backend),
             OpType::MatMul(op) => op.backward(inputs, grad, backend),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::TensorLayout;
+    use crate::backend::cpu::CpuBackend;
+
+    #[test]
+    fn broadcasted_shape_matches_expected() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 1, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![1, 4, 3]), backend.clone());
+        let out = broadcasted_shape(&a, &b).unwrap();
+        assert_eq!(out.as_slice(), &[2, 4, 3]);
+    }
+
+    #[test]
+    fn broadcasted_shape_incompatible_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![4, 3]), backend.clone());
+        let err = broadcasted_shape(&a, &b).unwrap_err();
+        match err {
+            crate::Error::LayoutMismatch { .. } => {}
+            _ => panic!("unexpected error variant"),
         }
     }
 }

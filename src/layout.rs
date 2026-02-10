@@ -1074,4 +1074,51 @@ mod tests {
         let orig_last_flat = l.ravel_index(&[4usize]).unwrap();
         assert_eq!(last_flat, orig_last_flat);
     }
+
+    // Tests for broadcast_to
+
+    #[test]
+    fn broadcast_to_same_shape_preserves_strides() {
+        let layout = TensorLayout::new(vec![2, 3]);
+        let out = layout.broadcast_to([2, 3]).unwrap();
+        assert_eq!(out.shape().as_slice(), &[2, 3]);
+        assert_eq!(out.strides(), layout.strides());
+        assert_eq!(out.offset(), layout.offset());
+    }
+
+    #[test]
+    fn broadcast_to_expands_with_zero_stride() {
+        let layout = TensorLayout::new(vec![1, 3]);
+        let out = layout.broadcast_to([2, 3]).unwrap();
+        assert_eq!(out.shape().as_slice(), &[2, 3]);
+        assert_eq!(out.strides(), &[0, 1]);
+    }
+
+    #[test]
+    fn broadcast_to_leading_dimension() {
+        let layout = TensorLayout::new(vec![3]);
+        let out = layout.broadcast_to([2, 3]).unwrap();
+        assert_eq!(out.shape().as_slice(), &[2, 3]);
+        assert_eq!(out.strides(), &[0, 1]);
+    }
+
+    #[test]
+    fn broadcast_to_incompatible_shape_errors() {
+        let layout = TensorLayout::new(vec![2, 3]);
+        let err = layout.broadcast_to([3, 2]).unwrap_err();
+        match err {
+            Error::LayoutMismatch { .. } => {}
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn broadcast_to_smaller_rank_errors() {
+        let layout = TensorLayout::new(vec![1, 3]);
+        let err = layout.broadcast_to([3]).unwrap_err();
+        match err {
+            Error::LayoutMismatch { .. } => {}
+            _ => panic!("unexpected error variant"),
+        }
+    }
 }

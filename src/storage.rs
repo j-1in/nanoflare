@@ -83,13 +83,13 @@ impl<T: DType> Index<usize> for CudaStorage<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        todo!("{}", index)
+        unimplemented!("{}", index)
     }
 }
 
 impl<T: DType> IndexMut<usize> for CudaStorage<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        todo!("{}", index)
+        unimplemented!("{}", index)
     }
 }
 
