@@ -9,7 +9,7 @@ use crate::dtype::{DType, FloatDType};
 use crate::index::TensorIndex;
 use crate::layout::TensorLayout;
 use crate::ops::*;
-use crate::{Error, Result};
+use crate::{Error, Result, TensorShape};
 
 macro_rules! impl_binary_op {
     // Trait-backed ops: "trait: Add, add, AddOp::new, true;"
@@ -572,12 +572,22 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         }
     }
 
-    fn unbroadcast_with_sum(&self, shape: impl AsRef<[usize]>) -> Result<Self>
+    fn unbroadcast_with_sum(&self, target_shape: impl AsRef<[usize]>) -> Result<Self>
     where
         T: crate::dtype::DType,
         B: crate::backend::Backend<T>,
     {
-        todo!()
+        let src_shape = self.layout.shape().as_slice();
+        let target_shape = target_shape.as_ref();
+
+        let axes = Self::reduction_axes_for_unbroadcast(src_shape, target_shape)?;
+        let mut result = self.sum_dim(axes, true)?;
+
+        if result.layout().shape().as_slice() != target_shape {
+            result = result.reshape(target_shape)?;
+        }
+
+        Ok(result)
     }
 
     /// Get the axes that need to be reduced to match the target shape for
@@ -585,8 +595,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     fn reduction_axes_for_unbroadcast(src: &[usize], target: &[usize]) -> Result<Vec<usize>> {
         if src.len() < target.len() {
             return Err(Error::ShapeMismatch {
-                expected: crate::TensorShape::new(target.to_vec()),
-                got:      crate::TensorShape::new(src.to_vec()),
+                expected: TensorShape::new(target.to_vec()),
+                got:      TensorShape::new(src.to_vec()),
             });
         }
 
@@ -606,8 +616,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                     axes.push(src_axis);
                 } else {
                     return Err(Error::ShapeMismatch {
-                        expected: crate::TensorShape::new(target.to_vec()),
-                        got:      crate::TensorShape::new(src.to_vec()),
+                        expected: TensorShape::new(target.to_vec()),
+                        got:      TensorShape::new(src.to_vec()),
                     });
                 }
             }
@@ -662,6 +672,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use crate::i;
 
     #[test]
@@ -729,6 +740,77 @@ mod tests {
             Error::ShapeMismatch { expected, got } => {
                 assert_eq!(expected.as_slice(), &[2, 2, 3]);
                 assert_eq!(got.as_slice(), &[2, 4, 3]);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn reduction_axes_for_unbroadcast_returns_expected_axes() {
+        let axes = Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
+            &[2, 3, 4],
+            &[2, 1, 4],
+        )
+        .unwrap();
+        assert_eq!(axes, vec![1]);
+
+        let axes_with_leading =
+            Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
+                &[5, 2, 3, 4],
+                &[2, 1, 4],
+            )
+            .unwrap();
+        assert_eq!(axes_with_leading, vec![0, 2]);
+    }
+
+    #[test]
+    fn unbroadcast_to_sum_reduces_leading_axis() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let storage = backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let t = Tensor::from_parts(storage, TensorLayout::new(vec![2, 3]), backend);
+
+        let out = t.unbroadcast_to([3], UnbroadcastMode::Sum).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[3]);
+        assert_eq!(out.storage().as_slice(), &[5.0, 7.0, 9.0]);
+    }
+
+    #[test]
+    fn unbroadcast_to_sum_preserves_singleton_target_dimensions() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3, 4]), backend);
+
+        let out = t.unbroadcast_to([2, 1, 4], UnbroadcastMode::Sum).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 1, 4]);
+        assert!(out.storage().as_slice().iter().all(|&v| v == 3.0));
+    }
+
+    #[test]
+    fn unbroadcast_to_sum_errors_on_shape_mismatch() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3, 4]), backend);
+
+        let err = t
+            .unbroadcast_to([2, 2, 4], UnbroadcastMode::Sum)
+            .unwrap_err();
+        match err {
+            Error::ShapeMismatch { expected, got } => {
+                assert_eq!(expected.as_slice(), &[2, 2, 4]);
+                assert_eq!(got.as_slice(), &[2, 3, 4]);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn unbroadcast_to_mean_reports_unsupported_operation() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3]), backend);
+
+        let err = t.unbroadcast_to([3], UnbroadcastMode::Mean).unwrap_err();
+        match err {
+            Error::UnsupportedOperation { op, backend } => {
+                assert_eq!(op, "unbroadcasting with mean");
+                assert_eq!(backend, "all backends");
             }
             _ => panic!("unexpected error variant"),
         }
