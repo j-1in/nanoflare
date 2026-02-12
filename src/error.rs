@@ -24,13 +24,6 @@ pub enum Error {
         index: usize,
         dim:   usize,
     },
-    DimensionOutOfRange {
-        dim:  usize,
-        rank: usize,
-    },
-    DuplicateDimension {
-        dim: usize,
-    },
     LinearIndexOutOfRange {
         index: usize,
         size:  usize,
@@ -49,8 +42,20 @@ pub enum Error {
         expected: Vec<usize>,
         got:      Vec<usize>,
     },
+    ShapeMismatch {
+        expected: TensorShape,
+        got:      TensorShape,
+    },
     InvalidSkipStep {
         step: usize,
+    },
+    NonContiguousLayout {
+        op: &'static str,
+    },
+    InvalidGradientCount {
+        op:       &'static str,
+        expected: usize,
+        got:      usize,
     },
     MatMulInvalidShape {
         a_shape: TensorShape,
@@ -104,16 +109,6 @@ impl fmt::Display for Error {
             Error::LinearIndexOutOfRange { index, size } => {
                 write!(f, "linear index {} out of range for size {}", index, size)
             }
-            Error::DimensionOutOfRange { dim, rank } => {
-                write!(
-                    f,
-                    "dimension {} out of range for tensor of rank {}",
-                    dim, rank
-                )
-            }
-            Error::DuplicateDimension { dim } => {
-                write!(f, "duplicate dimension {}", dim)
-            }
             Error::InvalidMergeRange { start, end, rank } => {
                 write!(
                     f,
@@ -134,8 +129,21 @@ impl fmt::Display for Error {
             Error::TensorSizeMismatch { expected, got } => {
                 write!(f, "expected tensor size {:?}, got {:?}", expected, got)
             }
+            Error::ShapeMismatch { expected, got } => {
+                write!(f, "shape mismatch: expected {:?}, got {:?}", expected, got)
+            }
             Error::InvalidSkipStep { step } => {
                 write!(f, "invalid skip step of {}", step)
+            }
+            Error::NonContiguousLayout { op } => {
+                write!(f, "operation {} requires a contiguous layout", op)
+            }
+            Error::InvalidGradientCount { op, expected, got } => {
+                write!(
+                    f,
+                    "operation {} returned {} gradients, expected {}",
+                    op, got, expected
+                )
             }
             Error::MatMulInvalidShape { a_shape, b_shape } => {
                 // FIXME

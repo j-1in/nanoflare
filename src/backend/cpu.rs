@@ -165,10 +165,10 @@ impl<T: DType> Backend<T> for CpuBackend {
 
         for &d in &dims {
             if d >= rank {
-                return Err(Error::DimensionOutOfRange { dim: d, rank });
+                return Err(Error::AxisOutOfBounds { axis: d, rank });
             }
             if !dims_set.insert(d) {
-                return Err(Error::DuplicateDimension { dim: d });
+                return Err(Error::DuplicateAxis { axis: d });
             }
         }
 
@@ -562,14 +562,30 @@ mod tests {
     }
 
     #[test]
-    fn sum_dim_duplicate_dimension_errors() {
+    fn sum_dim_duplicate_axis_errors() {
         let backend = Arc::new(CpuBackend::new());
         let layout = TensorLayout::new(vec![2, 2]);
         let a = Tensor::<f32, CpuBackend>::ones(layout, backend.clone());
 
         let err = backend.sum_dim(&a, vec![0, 0], false).unwrap_err();
         match err {
-            Error::DuplicateDimension { dim } => assert_eq!(dim, 0),
+            Error::DuplicateAxis { axis } => assert_eq!(axis, 0),
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn sum_dim_axis_out_of_bounds_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 2]);
+        let a = Tensor::<f32, CpuBackend>::ones(layout, backend.clone());
+
+        let err = backend.sum_dim(&a, vec![2], false).unwrap_err();
+        match err {
+            Error::AxisOutOfBounds { axis, rank } => {
+                assert_eq!(axis, 2);
+                assert_eq!(rank, 2);
+            }
             _ => panic!("unexpected error variant"),
         }
     }

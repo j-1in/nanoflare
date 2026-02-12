@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::dtype::{DType, FloatDType};
-use crate::{Result, Tensor, TensorShape};
+use crate::{Error, Result, Tensor, TensorShape};
 
 /// A trait representing a tensor operation.
 pub trait TensorOp<T: DType, B: Backend<T>>: Debug + Send + Sync {
@@ -367,7 +367,27 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
     }
 
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
-        // Validate that the inner dimensions match for matrix multiplication
+        let a_shape = a.layout().shape();
+        let b_shape = b.layout().shape();
+
+        if a_shape.len() < 2 || b_shape.len() < 2 {
+            return Err(Error::MatMulInvalidShape {
+                a_shape: a_shape.clone(),
+                b_shape: b_shape.clone(),
+            });
+        }
+
+        let a_last = a_shape[a_shape.len() - 1];
+        let b_second_last = b_shape[b_shape.len() - 2];
+        if a_last != b_second_last {
+            return Err(Error::MatMulDimensionMismatch {
+                a_last,
+                b_second_last,
+                a_shape: a_shape.clone(),
+                b_shape: b_shape.clone(),
+            });
+        }
+
         Ok(())
     }
 }
@@ -424,7 +444,7 @@ where
         };
 
         if dim_a != dim_b && dim_a != 1 && dim_b != 1 {
-            return Err(crate::Error::LayoutMismatch {
+            return Err(Error::LayoutMismatch {
                 a: a.layout().shape().clone(),
                 b: b.layout().shape().clone(),
             });
@@ -445,6 +465,19 @@ where
 }
 
 impl OpType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            OpType::Leaf => "Leaf",
+            OpType::Exp(_) => "Exp",
+            OpType::Log(_) => "Log",
+            OpType::Add(_) => "Add",
+            OpType::Sub(_) => "Sub",
+            OpType::Mul(_) => "Mul",
+            OpType::Div(_) => "Div",
+            OpType::MatMul(_) => "MatMul",
+        }
+    }
+
     /// Delegates the backward pass to the specific operation implementation
     pub fn backward<T: FloatDType, B: Backend<T>>(
         &self,
@@ -492,5 +525,47 @@ mod tests {
             crate::Error::LayoutMismatch { .. } => {}
             _ => panic!("unexpected error variant"),
         }
+    }
+
+    #[test]
+    fn matmul_validate_shapes_invalid_rank_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3, 4]), backend);
+
+        let err = MatMulOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::MatMulInvalidShape { .. } => {}
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn matmul_validate_shapes_inner_dim_mismatch_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![4, 5]), backend);
+
+        let err = MatMulOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::MatMulDimensionMismatch {
+                a_last,
+                b_second_last,
+                ..
+            } => {
+                assert_eq!(a_last, 3);
+                assert_eq!(b_second_last, 4);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn matmul_validate_shapes_accepts_compatible_inputs() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3, 4]), backend);
+
+        assert!(MatMulOp::new(&a, &b).is_ok());
     }
 }

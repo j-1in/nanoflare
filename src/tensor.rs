@@ -128,6 +128,11 @@ impl_binary_op!(
     fn: matmul, matmul, MatMulOp::new, false;
 );
 
+pub enum UnbroadcastMode {
+    Sum,
+    Mean,
+}
+
 impl<T: DType, B: Backend<T>> Tensor<T, B> {
     /// Create a new tensor filled with zeros, given a specific layout and
     /// backend.
@@ -399,15 +404,18 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             Tensor::ones(self.layout.clone(), self.backend.clone()),
         );
 
-        let add_grad =
-            |grads: &mut HashMap<NodeId, Tensor<T, B>>, id: NodeId, grad: Tensor<T, B>| {
-                if let Some(existing) = grads.remove(&id) {
-                    let sum = (&existing + &grad).expect("tensor addition failed in backward");
-                    grads.insert(id, sum);
-                } else {
-                    grads.insert(id, grad);
-                }
-            };
+        let add_grad = |grads: &mut HashMap<NodeId, Tensor<T, B>>,
+                        id: NodeId,
+                        grad: Tensor<T, B>|
+         -> Result<()> {
+            if let Some(existing) = grads.remove(&id) {
+                let sum = (&existing + &grad)?;
+                grads.insert(id, sum);
+            } else {
+                grads.insert(id, grad);
+            }
+            Ok(())
+        };
 
         for id in order {
             let grad = match grads.remove(&id) {
@@ -440,16 +448,15 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 .backward(inputs.as_slice(), &grad, &self.backend)?;
 
             if input_grads.len() != node.parents().len() {
-                panic!(
-                    "Op {:?} returned {} gradients but has {} parents",
-                    node.op(),
-                    input_grads.len(),
-                    node.parents().len()
-                );
+                return Err(Error::InvalidGradientCount {
+                    op:       node.op().name(),
+                    expected: node.parents().len(),
+                    got:      input_grads.len(),
+                });
             }
 
             for (i, parent_grad) in input_grads.into_iter().enumerate() {
-                add_grad(&mut grads, node.parents()[i], parent_grad);
+                add_grad(&mut grads, node.parents()[i], parent_grad)?;
             }
         }
 
@@ -525,7 +532,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 node_id: self.node_id,
             })
         } else {
-            todo!("non-contiguous reshape not implemented yet")
+            Err(Error::NonContiguousLayout { op: "reshape" })
         }
     }
 
@@ -544,6 +551,69 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             tape: self.tape.clone(),
             node_id: self.node_id,
         })
+    }
+
+    pub fn unbroadcast_to(
+        &self,
+        orig_shape: impl AsRef<[usize]>,
+        mode: UnbroadcastMode,
+    ) -> Result<Self>
+    where
+        T: crate::dtype::DType,
+        B: crate::backend::Backend<T>,
+    {
+        match mode {
+            UnbroadcastMode::Sum => Ok(self.unbroadcast_with_sum(orig_shape)?),
+            // TODO: mean over dimensions
+            UnbroadcastMode::Mean => Err(Error::UnsupportedOperation {
+                op:      "unbroadcasting with mean",
+                backend: "all backends",
+            }),
+        }
+    }
+
+    fn unbroadcast_with_sum(&self, shape: impl AsRef<[usize]>) -> Result<Self>
+    where
+        T: crate::dtype::DType,
+        B: crate::backend::Backend<T>,
+    {
+        todo!()
+    }
+
+    /// Get the axes that need to be reduced to match the target shape for
+    /// unbroadcasting.
+    fn reduction_axes_for_unbroadcast(src: &[usize], target: &[usize]) -> Result<Vec<usize>> {
+        if src.len() < target.len() {
+            return Err(Error::ShapeMismatch {
+                expected: crate::TensorShape::new(target.to_vec()),
+                got:      crate::TensorShape::new(src.to_vec()),
+            });
+        }
+
+        let mut axes = Vec::new();
+        let dim_diff = src.len() - target.len();
+
+        for i in 0..dim_diff {
+            axes.push(i)
+        }
+
+        for (i, &target_dim) in target.iter().enumerate() {
+            let src_axis = i + dim_diff;
+            let src_dim = src[src_axis];
+
+            if src_dim != target_dim {
+                if target_dim == 1 {
+                    axes.push(src_axis);
+                } else {
+                    return Err(Error::ShapeMismatch {
+                        expected: crate::TensorShape::new(target.to_vec()),
+                        got:      crate::TensorShape::new(src.to_vec()),
+                    });
+                }
+            }
+        }
+
+        Ok(axes)
     }
 
     /// Slice the tensor along a single dimension, producing a sub-layout and
@@ -615,5 +685,52 @@ mod tests {
         // Get a full tensor
         let full_tensor = tensor.get(i![.., ..]).unwrap();
         assert_eq!(full_tensor.layout().shape().as_slice(), &[2, 3]);
+    }
+
+    #[test]
+    fn reshape_non_contiguous_layout_errors() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3]), backend);
+        let non_contiguous = t.permute(&[1, 0]).unwrap();
+        let err = non_contiguous.reshape([6]).unwrap_err();
+
+        match err {
+            Error::NonContiguousLayout { op } => assert_eq!(op, "reshape"),
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn reduction_axes_for_unbroadcast_errors_when_src_rank_is_smaller() {
+        let err = Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
+            &[3],
+            &[2, 3],
+        )
+        .unwrap_err();
+
+        match err {
+            Error::ShapeMismatch { expected, got } => {
+                assert_eq!(expected.as_slice(), &[2, 3]);
+                assert_eq!(got.as_slice(), &[3]);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn reduction_axes_for_unbroadcast_errors_on_incompatible_shapes() {
+        let err = Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
+            &[2, 4, 3],
+            &[2, 2, 3],
+        )
+        .unwrap_err();
+
+        match err {
+            Error::ShapeMismatch { expected, got } => {
+                assert_eq!(expected.as_slice(), &[2, 2, 3]);
+                assert_eq!(got.as_slice(), &[2, 4, 3]);
+            }
+            _ => panic!("unexpected error variant"),
+        }
     }
 }

@@ -697,7 +697,10 @@ impl TensorShape {
         if index < self.0.len() {
             Ok(self.0.remove(index))
         } else {
-            Err(Error::DimensionOutOfRange { dim: index, rank: self.0.len() })
+            Err(Error::AxisOutOfBounds {
+                axis: index,
+                rank: self.0.len(),
+            })
         }
     }
 }

@@ -85,10 +85,13 @@ impl<T: DType> Backend<T> for CudaBackend {
         let mut dims_set = std::collections::HashSet::new();
         for &d in &dims {
             if d >= shape.len() {
-                return Err(Error::DimensionOutOfRange { dim: d, rank: shape.len() });
+                return Err(Error::AxisOutOfBounds {
+                    axis: d,
+                    rank: shape.len(),
+                });
             }
             if !dims_set.insert(d) {
-                return Err(Error::DuplicateDimension { dim: d });
+                return Err(Error::DuplicateAxis { axis: d });
             }
         }
 
