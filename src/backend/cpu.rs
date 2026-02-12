@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::Backend;
 use crate::dtype::{DType, FloatDType};
-use crate::layout::{self, TensorLayout, TensorShape};
+use crate::layout::{TensorLayout, TensorShape};
 use crate::storage::CpuStorage;
 use crate::tensor::Tensor;
 use crate::{Error, Result};
@@ -89,6 +89,17 @@ impl<T: DType> Backend<T> for CpuBackend {
         let res_layout = TensorLayout::new(shape.to_vec());
         let storage = <CpuBackend as Backend<U>>::from_vec(self, res);
         Ok(Tensor::from_parts(storage, res_layout, a.backend().clone()))
+    }
+
+    fn neg(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: std::ops::Neg<Output = T>,
+    {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| -x);
+        }
+
+        self.strided_unary_op(a, |x| -x)
     }
 
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>

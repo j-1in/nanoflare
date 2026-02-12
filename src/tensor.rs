@@ -669,6 +669,28 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     }
 }
 
+impl<T, B> Tensor<T, B>
+where
+    T: DType + std::ops::Neg<Output = T>,
+    B: Backend<T>,
+{
+    pub fn neg(&self) -> Result<Self> {
+        self.backend().neg(&self)
+    }
+}
+
+impl<'a, T, B> std::ops::Neg for &'a Tensor<T, B>
+where
+    T: DType + std::ops::Neg<Output = T>,
+    B: Backend<T>,
+{
+    type Output = Result<Tensor<T, B>>;
+
+    fn neg(self) -> Self::Output {
+        self.neg()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

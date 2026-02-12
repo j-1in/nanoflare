@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 
+use crate::Result;
 use crate::dtype::{DType, FloatDType};
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use crate::tensor::Tensor;
-use crate::{Result, TensorShape};
 
 pub mod cpu;
 pub mod cuda;
@@ -26,6 +26,9 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
         U: num_traits::NumCast;
 
     // Tensor Operations
+    fn neg(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: std::ops::Neg<Output = T>;
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType;

@@ -38,6 +38,10 @@ impl<T: DType> Backend<T> for CudaBackend {
         Err(Error::UnsupportedOperation { op: "cast", backend: "cuda" })
     }
 
+    fn neg(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        Err(Error::UnsupportedOperation { op: "neg", backend: "cuda" })
+    }
+
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType,
@@ -85,10 +89,7 @@ impl<T: DType> Backend<T> for CudaBackend {
         let mut dims_set = std::collections::HashSet::new();
         for &d in &dims {
             if d >= shape.len() {
-                return Err(Error::AxisOutOfBounds {
-                    axis: d,
-                    rank: shape.len(),
-                });
+                return Err(Error::AxisOutOfBounds { axis: d, rank: shape.len() });
             }
             if !dims_set.insert(d) {
                 return Err(Error::DuplicateAxis { axis: d });

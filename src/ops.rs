@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::dtype::{DType, FloatDType};
+use crate::tensor::UnbroadcastMode;
 use crate::{Error, Result, Tensor, TensorShape};
 
 /// A trait representing a tensor operation.
@@ -51,6 +52,43 @@ pub trait UnaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     /// `Ok(())` if the shape is valid, `Err(Error)` otherwise.
     fn validate_shape(_a: &Tensor<T, B>) -> Result<()> {
         Ok(())
+    }
+}
+
+/// The negation operation datatype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NegOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for NegOp
+where
+    T: FloatDType,
+{
+    fn name(&self) -> &str {
+        "Negate"
+    }
+
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let grad_a = (-grad)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Neg(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for NegOp
+where
+    T: FloatDType,
+{
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(NegOp)
     }
 }
 
@@ -157,10 +195,8 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for AddOp {
         grad: &Tensor<T, B>,
         _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        let grad_a = grad.clone();
-        let grad_b = grad.clone();
-
-        // TODO: Handle broadcasting
+        let grad_a = grad.unbroadcast_to(&self.lhs_orig_shape, UnbroadcastMode::Sum)?;
+        let grad_b = grad.unbroadcast_to(&self.rhs_orig_shape, UnbroadcastMode::Sum)?;
 
         Ok(vec![grad_a, grad_b])
     }
@@ -395,6 +431,7 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum OpType {
     Leaf,
+    Neg(NegOp),
     Exp(ExpOp),
     Log(LogOp),
     Add(AddOp),
@@ -468,6 +505,7 @@ impl OpType {
     pub fn name(&self) -> &'static str {
         match self {
             OpType::Leaf => "Leaf",
+            OpType::Neg(_) => "Neg",
             OpType::Exp(_) => "Exp",
             OpType::Log(_) => "Log",
             OpType::Add(_) => "Add",
@@ -487,6 +525,7 @@ impl OpType {
     ) -> Result<Vec<Tensor<T, B>>> {
         match self {
             OpType::Leaf => Ok(vec![]),
+            OpType::Neg(op) => op.backward(inputs, grad, backend),
             OpType::Exp(op) => op.backward(inputs, grad, backend),
             OpType::Log(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
@@ -548,11 +587,7 @@ mod tests {
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::MatMulDimensionMismatch {
-                a_last,
-                b_second_last,
-                ..
-            } => {
+            crate::Error::MatMulDimensionMismatch { a_last, b_second_last, .. } => {
                 assert_eq!(a_last, 3);
                 assert_eq!(b_second_last, 4);
             }
