@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::Backend;
 use crate::dtype::{DType, FloatDType};
-use crate::layout::TensorLayout;
+use crate::layout::{self, TensorLayout, TensorShape};
 use crate::storage::CpuStorage;
 use crate::tensor::Tensor;
 use crate::{Error, Result};
@@ -147,6 +147,65 @@ impl<T: DType> Backend<T> for CpuBackend {
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         todo!()
+    }
+
+    fn sum_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        // Check there are no duplicate dimensions and they are within bounds
+        let layout = a.layout();
+        let shape = layout.shape();
+        let rank = shape.len();
+        let mut dims = dim.into_iter().collect::<Vec<_>>();
+        dims.sort_unstable();
+        let mut dims_set = std::collections::HashSet::new();
+
+        for &d in &dims {
+            if d >= rank {
+                return Err(Error::DimensionOutOfRange { dim: d, rank });
+            }
+            if !dims_set.insert(d) {
+                return Err(Error::DuplicateDimension { dim: d });
+            }
+        }
+
+        if dims.len() == 0 {
+            return Ok(a.clone());
+        }
+
+        let mut reduce_mask = vec![false; rank];
+        for &d in &dims {
+            reduce_mask[d] = true;
+        }
+
+        let out_shape: Vec<_> = shape
+            .as_slice()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &s)| {
+                if reduce_mask[i] {
+                    if keepdim { Some(1) } else { None }
+                } else {
+                    Some(s)
+                }
+            })
+            .collect();
+
+        // Fast path: contiguous layout and reduction over a suffix of dimensions
+        let dims_is_suffix = {
+            let first = dims[0];
+            first + dims.len() == rank && dims.iter().enumerate().all(|(i, &d)| d == first + i)
+        };
+
+        if layout.is_contiguous() && dims_is_suffix {
+            return self.sum_dim_fast_path(&dims, shape, &out_shape, a);
+        }
+
+        // General strided reduction
+        self.sum_dim_strided(rank, &reduce_mask, layout, shape, &out_shape, a, keepdim)
     }
 }
 
@@ -298,6 +357,93 @@ impl CpuBackend {
             a.backend().clone(),
         ))
     }
+
+    fn sum_dim_fast_path<T: DType>(
+        &self,
+        dims: &[usize],
+        shape: &TensorShape,
+        out_shape: &[usize],
+        a: &Tensor<T, Self>,
+    ) -> Result<Tensor<T, Self>> {
+        let out_layout = TensorLayout::new(out_shape.to_vec());
+        let out_numel = out_layout.shape().numel();
+
+        let shape_slice = shape.as_slice();
+        let outer = shape_slice[..dims[0]].iter().product::<usize>();
+        let inner = shape_slice[dims[0]..].iter().product::<usize>();
+        let a_slice = self.contiguous_slice(a);
+
+        let mut out = vec![T::zero(); out_numel];
+        for i in 0..outer {
+            let base = i * inner;
+            let mut acc = T::zero();
+            for j in 0..inner {
+                acc = acc + a_slice[base + j];
+            }
+            out[i] = acc;
+        }
+
+        let storage = self.from_vec(out);
+        return Ok(Tensor::from_parts(storage, out_layout, a.backend().clone()));
+    }
+
+    fn sum_dim_strided<T: DType>(
+        &self,
+        rank: usize,
+        reduce_mask: &[bool],
+        layout: &TensorLayout,
+        shape: &TensorShape,
+        out_shape: &[usize],
+        a: &Tensor<T, Self>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        let out_layout = TensorLayout::new(out_shape.to_vec());
+        let out_numel = out_layout.shape().numel();
+
+        let mut out = vec![T::zero(); out_numel];
+
+        let out_strides = out_layout.strides();
+        let mut out_stride_for_dim = vec![0; rank];
+        let mut out_axis = 0usize;
+        for i in 0..rank {
+            if reduce_mask[i] {
+                out_stride_for_dim[i] = 0;
+            } else if keepdim {
+                out_stride_for_dim[i] = out_strides[i];
+            } else {
+                out_stride_for_dim[i] = out_strides[out_axis];
+                out_axis += 1;
+            }
+        }
+
+        let shape_slice = shape.as_slice();
+        let numel = shape.numel();
+        let a_storage = &a.storage()[..];
+        let mut a_ptr = layout.offset();
+        let mut out_ptr = 0usize;
+        let mut idx = vec![0; rank];
+
+        for _ in 0..numel {
+            out[out_ptr] = out[out_ptr] + a_storage[a_ptr];
+
+            for dim in (0..rank).rev() {
+                idx[dim] += 1;
+
+                if idx[dim] < shape_slice[dim] {
+                    a_ptr += layout.strides()[dim];
+                    out_ptr += out_stride_for_dim[dim];
+                    break;
+                } else {
+                    idx[dim] = 0;
+                    a_ptr -= layout.strides()[dim] * (shape_slice[dim] - 1);
+                    out_ptr -= out_stride_for_dim[dim] * (shape_slice[dim] - 1);
+                }
+            }
+        }
+
+        let storage = self.from_vec(out);
+        Ok(Tensor::from_parts(storage, out_layout, a.backend().clone()))
+    }
 }
 
 #[cfg(test)]
@@ -362,6 +508,68 @@ mod tests {
             Error::RequiresGradUnsupported { op } => {
                 assert_eq!(op, "cast");
             }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn sum_dim_contiguous_axis1() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 3]);
+        let storage = backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let a = Tensor::from_parts(storage, layout, backend.clone());
+
+        let out = backend.sum_dim(&a, vec![1], false).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2]);
+        assert_eq!(out.storage().as_slice(), &[6.0, 15.0]);
+    }
+
+    #[test]
+    fn sum_dim_keepdim_axis1() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 3]);
+        let storage = backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let a = Tensor::from_parts(storage, layout, backend.clone());
+
+        let out = backend.sum_dim(&a, vec![1], true).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 1]);
+        assert_eq!(out.storage().as_slice(), &[6.0, 15.0]);
+    }
+
+    #[test]
+    fn sum_dim_multiple_axes_to_scalar() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 3]);
+        let storage = backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let a = Tensor::from_parts(storage, layout, backend.clone());
+
+        let out = backend.sum_dim(&a, vec![0, 1], false).unwrap();
+        assert!(out.layout().shape().as_slice().is_empty());
+        assert_eq!(out.storage().as_slice(), &[21.0]);
+    }
+
+    #[test]
+    fn sum_dim_non_contiguous_view() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![4, 4]);
+        let storage = backend.from_vec((0..16).map(|v| v as f32).collect());
+        let a = Tensor::from_parts(storage, layout, backend.clone());
+        let view = a.skip(1, 2).unwrap(); // take columns 0 and 2
+
+        let out = backend.sum_dim(&view, vec![1], false).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[4]);
+        assert_eq!(out.storage().as_slice(), &[2.0, 10.0, 18.0, 26.0]);
+    }
+
+    #[test]
+    fn sum_dim_duplicate_dimension_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 2]);
+        let a = Tensor::<f32, CpuBackend>::ones(layout, backend.clone());
+
+        let err = backend.sum_dim(&a, vec![0, 0], false).unwrap_err();
+        match err {
+            Error::DuplicateDimension { dim } => assert_eq!(dim, 0),
             _ => panic!("unexpected error variant"),
         }
     }

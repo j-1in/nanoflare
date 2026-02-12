@@ -8,7 +8,7 @@ use crate::dtype::{DType, FloatDType};
 use crate::layout::TensorLayout;
 use crate::storage::CudaStorage;
 use crate::tensor::Tensor;
-use crate::{Error, Result};
+use crate::{Error, Result, TensorShape};
 
 #[derive(Debug, Clone)]
 pub struct CudaBackend;
@@ -70,5 +70,28 @@ impl<T: DType> Backend<T> for CudaBackend {
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         Err(Error::UnsupportedOperation { op: "matmul", backend: "cuda" })
+    }
+
+    fn sum_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        // Check there are no duplicate dimensions and they are within bounds
+        let shape = a.layout().shape();
+        let mut dims = dim.into_iter().collect::<Vec<_>>();
+        dims.sort_unstable();
+        let mut dims_set = std::collections::HashSet::new();
+        for &d in &dims {
+            if d >= shape.len() {
+                return Err(Error::DimensionOutOfRange { dim: d, rank: shape.len() });
+            }
+            if !dims_set.insert(d) {
+                return Err(Error::DuplicateDimension { dim: d });
+            }
+        }
+
+        Err(Error::UnsupportedOperation { op: "sum_dim", backend: "cuda" })
     }
 }

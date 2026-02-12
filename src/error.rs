@@ -24,6 +24,13 @@ pub enum Error {
         index: usize,
         dim:   usize,
     },
+    DimensionOutOfRange {
+        dim:  usize,
+        rank: usize,
+    },
+    DuplicateDimension {
+        dim: usize,
+    },
     LinearIndexOutOfRange {
         index: usize,
         size:  usize,
@@ -96,6 +103,16 @@ impl fmt::Display for Error {
             }
             Error::LinearIndexOutOfRange { index, size } => {
                 write!(f, "linear index {} out of range for size {}", index, size)
+            }
+            Error::DimensionOutOfRange { dim, rank } => {
+                write!(
+                    f,
+                    "dimension {} out of range for tensor of rank {}",
+                    dim, rank
+                )
+            }
+            Error::DuplicateDimension { dim } => {
+                write!(f, "duplicate dimension {}", dim)
             }
             Error::InvalidMergeRange { start, end, rank } => {
                 write!(

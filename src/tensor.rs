@@ -579,6 +579,14 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             node_id: self.node_id,
         })
     }
+
+    /// Sum the tensor along specified dimensions, optionally keeping the
+    /// reduced dimensions.
+    ///
+    /// This is a wrapper around the backend's `sum_dim` method.
+    pub fn sum_dim(&self, dim: impl IntoIterator<Item = usize>, keepdim: bool) -> Result<Self> {
+        self.backend().sum_dim(self, dim, keepdim)
+    }
 }
 
 #[cfg(test)]

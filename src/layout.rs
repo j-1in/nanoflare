@@ -692,6 +692,14 @@ impl TensorShape {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    pub fn remove(&mut self, index: usize) -> Result<usize> {
+        if index < self.0.len() {
+            Ok(self.0.remove(index))
+        } else {
+            Err(Error::DimensionOutOfRange { dim: index, rank: self.0.len() })
+        }
+    }
 }
 
 impl<'a> IntoIterator for &'a TensorShape {

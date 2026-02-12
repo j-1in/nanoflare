@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 
-use crate::Result;
 use crate::dtype::{DType, FloatDType};
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use crate::tensor::Tensor;
+use crate::{Result, TensorShape};
 
 pub mod cpu;
 pub mod cuda;
@@ -37,4 +37,23 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
     fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
+
+    /// Sum over specified dimensions of a Tensor
+    ///
+    /// # Arguments
+    /// * `a` - The input tensor
+    /// * `dim` - The dimensions to sum over
+    /// * `keepdim` - Whether to keep the summed dimensions
+    ///
+    /// # Returns
+    /// A new tensor with the specified dimensions summed
+    ///
+    /// # Errors
+    /// Returns an error if the specified dimensions are out of bounds
+    fn sum_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>>;
 }
