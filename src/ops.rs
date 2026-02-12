@@ -61,7 +61,7 @@ pub struct NegOp;
 
 impl<T: DType, B: Backend<T>> TensorOp<T, B> for NegOp
 where
-    T: FloatDType,
+    T: std::ops::Neg<Output = T>,
 {
     fn name(&self) -> &str {
         "Negate"
@@ -85,7 +85,7 @@ where
 
 impl<T: DType, B: Backend<T>> UnaryOp<T, B> for NegOp
 where
-    T: FloatDType,
+    T: std::ops::Neg<Output = T>,
 {
     fn new(_a: &Tensor<T, B>) -> Result<Self> {
         Ok(NegOp)
