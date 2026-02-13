@@ -92,6 +92,69 @@ where
     }
 }
 
+/// The absolute operation datatype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AbsOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for AbsOp {
+    fn name(&self) -> &str {
+        "Abs"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = &inputs[0];
+        let grad_a = (&a.sgn()? * grad)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Abs(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for AbsOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(AbsOp)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SgnOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for SgnOp {
+    fn name(&self) -> &str {
+        "Sgn"
+    }
+
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        // Derivative of sgn is 0 almost everywhere (undefined at 0).
+        // We use zero as the default subgradient.
+        let grad_a = Tensor::zeros(grad.layout().clone(), backend.clone());
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Sgn(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for SgnOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(SgnOp)
+    }
+}
+
 /// The exponential operation datatype.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpOp;
@@ -432,6 +495,8 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
 pub enum OpType {
     Leaf,
     Neg(NegOp),
+    Abs(AbsOp),
+    Sgn(SgnOp),
     Exp(ExpOp),
     Log(LogOp),
     Add(AddOp),
@@ -506,6 +571,8 @@ impl OpType {
         match self {
             OpType::Leaf => "Leaf",
             OpType::Neg(_) => "Neg",
+            OpType::Abs(_) => "Abs",
+            OpType::Sgn(_) => "Sgn",
             OpType::Exp(_) => "Exp",
             OpType::Log(_) => "Log",
             OpType::Add(_) => "Add",
@@ -526,6 +593,8 @@ impl OpType {
         match self {
             OpType::Leaf => Ok(vec![]),
             OpType::Neg(op) => op.backward(inputs, grad, backend),
+            OpType::Abs(op) => op.backward(inputs, grad, backend),
+            OpType::Sgn(op) => op.backward(inputs, grad, backend),
             OpType::Exp(op) => op.backward(inputs, grad, backend),
             OpType::Log(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
@@ -542,6 +611,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::backend::Backend;
     use crate::TensorLayout;
     use crate::backend::cpu::CpuBackend;
 
@@ -602,5 +672,37 @@ mod tests {
         let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3, 4]), backend);
 
         assert!(MatMulOp::new(&a, &b).is_ok());
+    }
+
+    #[test]
+    fn neg_op_backward_negates_incoming_gradient() {
+        let backend = Arc::new(CpuBackend::new());
+        let input = Tensor::from_parts(
+            backend.from_vec(vec![2.0f32, -1.0, 0.5]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::ones(TensorLayout::new(vec![3]), backend.clone());
+
+        let op = NegOp::new(&input).unwrap();
+        let out = op.backward(&[input], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].storage().as_slice(), &[-1.0, -1.0, -1.0]);
+    }
+
+    #[test]
+    fn sgn_op_backward_returns_zeros() {
+        let backend = Arc::new(CpuBackend::new());
+        let input = Tensor::from_parts(
+            backend.from_vec(vec![-3.0f32, 0.0, 5.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::ones(TensorLayout::new(vec![3]), backend.clone());
+
+        let op = SgnOp::new(&input).unwrap();
+        let out = op.backward(&[input], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].storage().as_slice(), &[0.0, 0.0, 0.0]);
     }
 }

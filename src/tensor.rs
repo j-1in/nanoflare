@@ -75,8 +75,7 @@ macro_rules! impl_binary_op {
 macro_rules! impl_unary_op {
     ($($trait:ident, $method:ident, $op:expr);* $(;)?) => {
         $(
-            // 1. Owned implementation: a + b
-            impl<T:DType, B: Backend<T>> Tensor<T, B> {
+            impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 pub fn $method(&self) -> Result<Self> {
                     match $op(&self) {
                         Ok(op) => self.unary_op(op, |backend, a| backend.$method(a)),
@@ -98,7 +97,35 @@ pub struct Tensor<T: DType, B: Backend<T>> {
     node_id:       Option<NodeId>,
 }
 
-impl_unary_op!();
+impl_unary_op!(
+    Abs, abs, AbsOp::new;
+    Sgn, sgn, SgnOp::new;
+);
+
+impl<T, B> Tensor<T, B>
+where
+    T: DType + std::ops::Neg<Output = T>,
+    B: Backend<T>,
+{
+    pub fn neg(&self) -> Result<Self> {
+        match NegOp::new(&self) {
+            Ok(op) => self.unary_op(op, |backend, a| backend.neg(a)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<'a, T, B> std::ops::Neg for &'a Tensor<T, B>
+where
+    T: DType + std::ops::Neg<Output = T>,
+    B: Backend<T>,
+{
+    type Output = Result<Tensor<T, B>>;
+
+    fn neg(self) -> Self::Output {
+        self.neg()
+    }
+}
 
 impl<T, B> Tensor<T, B>
 where
@@ -418,19 +445,20 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         };
 
         for id in order {
-            let grad = match grads.remove(&id) {
-                Some(g) => g,
-                None => continue,
-            };
-
             let node = match tape.node(id) {
                 Some(n) => n,
                 None => continue,
             };
 
             if let OpType::Leaf = node.op() {
+                // Keep accumulated gradients for leaf nodes in the map.
                 continue;
             }
+
+            let grad = match grads.remove(&id) {
+                Some(g) => g,
+                None => continue,
+            };
 
             let mut inputs = Vec::new();
             for parent_id in node.parents() {
@@ -669,33 +697,12 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     }
 }
 
-impl<T, B> Tensor<T, B>
-where
-    T: DType + std::ops::Neg<Output = T>,
-    B: Backend<T>,
-{
-    pub fn neg(&self) -> Result<Self> {
-        self.backend().neg(&self)
-    }
-}
-
-impl<'a, T, B> std::ops::Neg for &'a Tensor<T, B>
-where
-    T: DType + std::ops::Neg<Output = T>,
-    B: Backend<T>,
-{
-    type Output = Result<Tensor<T, B>>;
-
-    fn neg(self) -> Self::Output {
-        self.neg()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::Backend;
     use crate::i;
+    use crate::Tape;
 
     #[test]
     fn test_tensor_indexing() {
@@ -836,5 +843,76 @@ mod tests {
             }
             _ => panic!("unexpected error variant"),
         }
+    }
+
+    #[test]
+    fn neg_for_reference_tracks_autograd() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, crate::backend::cpu::CpuBackend>::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![2.0f32, -3.0]),
+            TensorLayout::new(vec![2]),
+            backend,
+        )
+        .requires_grad(tape);
+
+        let out = (-&a).unwrap();
+        let grads = out.backward().unwrap();
+        let grad_a = grads.get(&a).expect("missing gradient for a");
+
+        assert_eq!(grad_a.layout().shape().as_slice(), &[2]);
+        assert_eq!(grad_a.storage().as_slice(), &[-1.0, -1.0]);
+    }
+
+    #[test]
+    fn abs_backward_matches_signum() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, crate::backend::cpu::CpuBackend>::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![-2.0f32, 0.0, 3.0]),
+            TensorLayout::new(vec![3]),
+            backend,
+        )
+        .requires_grad(tape);
+
+        let out = a.abs().unwrap();
+        let grads = out.backward().unwrap();
+        let grad_a = grads.get(&a).expect("missing gradient for a");
+
+        assert_eq!(grad_a.storage().as_slice(), &[-1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn sgn_backward_returns_zero_subgradient() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, crate::backend::cpu::CpuBackend>::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![-2.0f32, 0.0, 3.0]),
+            TensorLayout::new(vec![3]),
+            backend,
+        )
+        .requires_grad(tape);
+
+        let out = a.sgn().unwrap();
+        let grads = out.backward().unwrap();
+        let grad_a = grads.get(&a).expect("missing gradient for a");
+
+        assert_eq!(grad_a.storage().as_slice(), &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn abs_and_sgn_work_for_unsigned_tensors() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![0u32, 4, 9]),
+            TensorLayout::new(vec![3]),
+            backend,
+        );
+
+        let abs_out = a.abs().unwrap();
+        assert_eq!(abs_out.storage().as_slice(), &[0, 4, 9]);
+
+        let sgn_out = a.sgn().unwrap();
+        assert_eq!(sgn_out.storage().as_slice(), &[0, 1, 1]);
     }
 }

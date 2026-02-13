@@ -29,6 +29,8 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
     fn neg(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: std::ops::Neg<Output = T>;
+    fn abs(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
+    fn sgn(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType;

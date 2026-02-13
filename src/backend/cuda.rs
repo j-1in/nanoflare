@@ -42,6 +42,14 @@ impl<T: DType> Backend<T> for CudaBackend {
         Err(Error::UnsupportedOperation { op: "neg", backend: "cuda" })
     }
 
+    fn abs(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        Err(Error::UnsupportedOperation { op: "abs", backend: "cuda" })
+    }
+
+    fn sgn(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        Err(Error::UnsupportedOperation { op: "sgn", backend: "cuda" })
+    }
+
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType,

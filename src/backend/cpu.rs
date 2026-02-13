@@ -102,6 +102,22 @@ impl<T: DType> Backend<T> for CpuBackend {
         self.strided_unary_op(a, |x| -x)
     }
 
+    fn abs(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| x.abs());
+        }
+
+        self.strided_unary_op(a, |x| x.abs())
+    }
+
+    fn sgn(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| x.sgn());
+        }
+
+        self.strided_unary_op(a, |x| x.sgn())
+    }
+
     fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType,
@@ -460,6 +476,7 @@ impl CpuBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use crate::Tape;
 
     #[test]
@@ -471,6 +488,93 @@ mod tests {
         let c = (&a + &b).unwrap();
 
         assert_eq!(c.layout(), &layout);
+    }
+
+    #[test]
+    fn neg_contiguous_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![4]);
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, -2.0, 0.0, 3.5]),
+            layout,
+            backend.clone(),
+        );
+
+        let out = backend.neg(&a).unwrap();
+        assert_eq!(out.storage().as_slice(), &[-1.0, 2.0, -0.0, -3.5]);
+    }
+
+    #[test]
+    fn neg_strided_view_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 4]);
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            layout,
+            backend.clone(),
+        );
+        let view = a.skip(1, 2).unwrap(); // [[1, 3], [5, 7]]
+
+        let out = backend.neg(&view).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 2]);
+        assert_eq!(out.storage().as_slice(), &[-1.0, -3.0, -5.0, -7.0]);
+    }
+
+    #[test]
+    fn abs_signed_and_unsigned() {
+        let backend = Arc::new(CpuBackend::new());
+
+        let a_i32 = Tensor::from_parts(
+            backend.from_vec(vec![-3i32, 0, 7]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let out_i32 = backend.abs(&a_i32).unwrap();
+        assert_eq!(out_i32.storage().as_slice(), &[3, 0, 7]);
+
+        let a_u32 = Tensor::from_parts(
+            backend.from_vec(vec![1u32, 0, 7]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let out_u32 = backend.abs(&a_u32).unwrap();
+        assert_eq!(out_u32.storage().as_slice(), &[1, 0, 7]);
+    }
+
+    #[test]
+    fn sgn_signed_and_unsigned() {
+        let backend = Arc::new(CpuBackend::new());
+
+        let a_i32 = Tensor::from_parts(
+            backend.from_vec(vec![-9i32, 0, 5]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let out_i32 = backend.sgn(&a_i32).unwrap();
+        assert_eq!(out_i32.storage().as_slice(), &[-1, 0, 1]);
+
+        let a_u32 = Tensor::from_parts(
+            backend.from_vec(vec![0u32, 2, 9]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let out_u32 = backend.sgn(&a_u32).unwrap();
+        assert_eq!(out_u32.storage().as_slice(), &[0, 1, 1]);
+    }
+
+    #[test]
+    fn sgn_strided_view_i32() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![-1i32, 2, 0, -3, 4, -5]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        let view = a.skip(1, 2).unwrap(); // [[-1, 0], [-3, -5]]
+
+        let out = backend.sgn(&view).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 2]);
+        assert_eq!(out.storage().as_slice(), &[-1, 0, -1, -1]);
     }
 
     #[test]
