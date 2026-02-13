@@ -14,14 +14,14 @@ This document outlines the development plan for ~nanoflare~, a lightweight Rust 
     - [-] Basic unary operations.
         - [X] Exponentiation
         - [X] log
-        - [ ] Negation, absolute
+        - [X] Negation, absolute
 - [-] *Autograd Engine*:
     - [X] Reverse-mode automatic differentiation (~Tape~, ~Node~, ~Gradients~).
     - [X] Dynamic computational graph construction.
     - [-] Gradient propagation for supported operations.
 
 ** Phase 2: CPU Efficiency & Parallelism
-- [-] *Broadcasting*: Implement NumPy-style broadcasting for binary operations.
+- [X] *Broadcasting*: Implement NumPy-style broadcasting for binary operations.
 - [-] *More operations*: more tensor operations:
     - [ ] Matrix Multiplication
 - [ ] *rayon Integration*: Parallelize ~CpuBackend~ operations using ~rayon~ to utilize all CPU cores.
