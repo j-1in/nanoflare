@@ -258,10 +258,9 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for AddOp {
         grad: &Tensor<T, B>,
         _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        let grad_a = grad.unbroadcast_to(&self.lhs_orig_shape, UnbroadcastMode::Sum)?;
-        let grad_b = grad.unbroadcast_to(&self.rhs_orig_shape, UnbroadcastMode::Sum)?;
-
-        Ok(vec![grad_a, grad_b])
+        let grad_a = grad.clone();
+        let grad_b = grad.clone();
+        unbroadcast_binary_grads(grad_a, grad_b, &self.lhs_orig_shape, &self.rhs_orig_shape)
     }
 
     fn to_optype(&self) -> OpType {
@@ -306,8 +305,7 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for SubOp {
         let zero = Tensor::zeros(grad.layout().clone(), backend.clone());
         let grad_b = (&zero - grad)?;
 
-        // TODO: Handle broadcasting
-        Ok(vec![grad_a, grad_b])
+        unbroadcast_binary_grads(grad_a, grad_b, &self.lhs_orig_shape, &self.rhs_orig_shape)
     }
 
     fn to_optype(&self) -> OpType {
@@ -353,8 +351,7 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MulOp {
         let grad_a = (grad * b)?;
         let grad_b = (grad * a)?;
 
-        // TODO: handle broadcasting
-        Ok(vec![grad_a, grad_b])
+        unbroadcast_binary_grads(grad_a, grad_b, &self.lhs_orig_shape, &self.rhs_orig_shape)
     }
 
     fn to_optype(&self) -> OpType {
@@ -406,9 +403,8 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for DivOp {
 
         let zero = Tensor::zeros(grad.layout().clone(), backend.clone());
         let grad_b = (&zero - &term)?;
-        // TODO: handle broadcasting
 
-        Ok(vec![grad_a, grad_b])
+        unbroadcast_binary_grads(grad_a, grad_b, &self.lhs_orig_shape, &self.rhs_orig_shape)
     }
 
     fn to_optype(&self) -> OpType {
@@ -489,6 +485,17 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
 
         Ok(())
     }
+}
+
+fn unbroadcast_binary_grads<T: DType, B: Backend<T>>(
+    grad_a: Tensor<T, B>,
+    grad_b: Tensor<T, B>,
+    lhs_shape: &TensorShape,
+    rhs_shape: &TensorShape,
+) -> Result<Vec<Tensor<T, B>>> {
+    let grad_a = grad_a.unbroadcast_to(lhs_shape, UnbroadcastMode::Sum)?;
+    let grad_b = grad_b.unbroadcast_to(rhs_shape, UnbroadcastMode::Sum)?;
+    Ok(vec![grad_a, grad_b])
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -611,8 +618,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::backend::Backend;
     use crate::TensorLayout;
+    use crate::backend::Backend;
     use crate::backend::cpu::CpuBackend;
 
     #[test]
@@ -704,5 +711,121 @@ mod tests {
         let out = op.backward(&[input], &grad, &backend).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].storage().as_slice(), &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn add_backward_unbroadcasts_broadcasted_rhs() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![10.0f32, 20.0, 30.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::ones(TensorLayout::new(vec![2, 3]), backend.clone());
+
+        let op = AddOp::new(&a, &b).unwrap();
+        let out = op.backward(&[a, b], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        assert_eq!(out[0].storage().as_slice(), &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(out[1].layout().shape().as_slice(), &[3]);
+        assert_eq!(out[1].storage().as_slice(), &[2.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn sub_backward_unbroadcasts_broadcasted_rhs() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![10.0f32, 20.0, 30.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::ones(TensorLayout::new(vec![2, 3]), backend.clone());
+
+        let op = SubOp::new(&a, &b).unwrap();
+        let out = op.backward(&[a, b], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        assert_eq!(out[0].storage().as_slice(), &[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(out[1].layout().shape().as_slice(), &[3]);
+        assert_eq!(out[1].storage().as_slice(), &[-2.0, -2.0, -2.0]);
+    }
+
+    #[test]
+    fn mul_backward_unbroadcasts_both_inputs() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![10.0f32, 20.0, 30.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::ones(TensorLayout::new(vec![2, 3]), backend.clone());
+
+        let op = MulOp::new(&a, &b).unwrap();
+        let out = op.backward(&[a, b], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        assert_eq!(
+            out[0].storage().as_slice(),
+            &[10.0, 20.0, 30.0, 10.0, 20.0, 30.0]
+        );
+        assert_eq!(out[1].layout().shape().as_slice(), &[3]);
+        assert_eq!(out[1].storage().as_slice(), &[5.0, 7.0, 9.0]);
+    }
+
+    #[test]
+    fn div_backward_unbroadcasts_both_inputs() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![10.0f32, 20.0, 30.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::ones(TensorLayout::new(vec![2, 3]), backend.clone());
+
+        let op = DivOp::new(&a, &b).unwrap();
+        let out = op.backward(&[a, b], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        let expected_grad_a = [0.1f32, 0.05, 1.0 / 30.0, 0.1, 0.05, 1.0 / 30.0];
+        for (got, expected) in out[0]
+            .storage()
+            .as_slice()
+            .iter()
+            .zip(expected_grad_a.iter())
+        {
+            assert!((got - expected).abs() < 1e-6);
+        }
+
+        assert_eq!(out[1].layout().shape().as_slice(), &[3]);
+        let expected_grad_b = [-0.05f32, -0.0175, -0.01];
+        for (got, expected) in out[1]
+            .storage()
+            .as_slice()
+            .iter()
+            .zip(expected_grad_b.iter())
+        {
+            assert!((got - expected).abs() < 1e-6);
+        }
     }
 }
