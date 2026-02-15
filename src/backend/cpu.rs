@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::Backend;
+use crate::backend::private;
 use crate::dtype::{DType, FloatDType};
 use crate::layout::{TensorLayout, TensorShape};
 use crate::storage::CpuStorage;
@@ -91,6 +92,64 @@ impl<T: DType> Backend<T> for CpuBackend {
         Ok(Tensor::from_parts(storage, res_layout, a.backend().clone()))
     }
 
+    fn sum_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        // Check there are no duplicate dimensions and they are within bounds
+        let layout = a.layout();
+        let shape = layout.shape();
+        let rank = shape.len();
+        let mut dims = dim.into_iter().collect::<Vec<_>>();
+        dims.sort_unstable();
+        let mut dims_set = std::collections::HashSet::new();
+
+        for &d in &dims {
+            if d >= rank {
+                return Err(Error::AxisOutOfBounds { axis: d, rank });
+            }
+            if !dims_set.insert(d) {
+                return Err(Error::DuplicateAxis { axis: d });
+            }
+        }
+
+        if dims.len() == 0 {
+            return Ok(a.clone());
+        }
+
+        let mut reduce_mask = vec![false; rank];
+        for &d in &dims {
+            reduce_mask[d] = true;
+        }
+
+        let out_shape: Vec<_> =
+            shape
+                .as_slice()
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &s)| {
+                    if reduce_mask[i] { if keepdim { Some(1) } else { None } } else { Some(s) }
+                })
+                .collect();
+
+        // Fast path: contiguous layout and reduction over a suffix of dimensions
+        let dims_is_suffix = {
+            let first = dims[0];
+            first + dims.len() == rank && dims.iter().enumerate().all(|(i, &d)| d == first + i)
+        };
+
+        if layout.is_contiguous() && dims_is_suffix {
+            return self.sum_dim_fast_path(&dims, shape, &out_shape, a);
+        }
+
+        // General strided reduction
+        self.sum_dim_strided(rank, &reduce_mask, layout, shape, &out_shape, a, keepdim)
+    }
+}
+
+impl<T: DType> private::BackendOps<T, CpuBackend> for CpuBackend {
     fn neg(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: std::ops::Neg<Output = T>,
@@ -173,67 +232,17 @@ impl<T: DType> Backend<T> for CpuBackend {
     }
 
     fn dot(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        let a_shape = a.layout().shape();
+        let b_shape = b.layout().shape();
+
+        let n = a_shape[0];
+        let a_stride = a.layout().strides()[0];
+
         todo!("cpu dot with {a:?} and {b:?}")
     }
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         todo!("cpu matmul with {a:?} and {b:?}")
-    }
-
-    fn sum_dim(
-        &self,
-        a: &Tensor<T, Self>,
-        dim: impl IntoIterator<Item = usize>,
-        keepdim: bool,
-    ) -> Result<Tensor<T, Self>> {
-        // Check there are no duplicate dimensions and they are within bounds
-        let layout = a.layout();
-        let shape = layout.shape();
-        let rank = shape.len();
-        let mut dims = dim.into_iter().collect::<Vec<_>>();
-        dims.sort_unstable();
-        let mut dims_set = std::collections::HashSet::new();
-
-        for &d in &dims {
-            if d >= rank {
-                return Err(Error::AxisOutOfBounds { axis: d, rank });
-            }
-            if !dims_set.insert(d) {
-                return Err(Error::DuplicateAxis { axis: d });
-            }
-        }
-
-        if dims.len() == 0 {
-            return Ok(a.clone());
-        }
-
-        let mut reduce_mask = vec![false; rank];
-        for &d in &dims {
-            reduce_mask[d] = true;
-        }
-
-        let out_shape: Vec<_> =
-            shape
-                .as_slice()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, &s)| {
-                    if reduce_mask[i] { if keepdim { Some(1) } else { None } } else { Some(s) }
-                })
-                .collect();
-
-        // Fast path: contiguous layout and reduction over a suffix of dimensions
-        let dims_is_suffix = {
-            let first = dims[0];
-            first + dims.len() == rank && dims.iter().enumerate().all(|(i, &d)| d == first + i)
-        };
-
-        if layout.is_contiguous() && dims_is_suffix {
-            return self.sum_dim_fast_path(&dims, shape, &out_shape, a);
-        }
-
-        // General strided reduction
-        self.sum_dim_strided(rank, &reduce_mask, layout, shape, &out_shape, a, keepdim)
     }
 }
 
@@ -476,6 +485,7 @@ impl CpuBackend {
 
 #[cfg(test)]
 mod tests {
+    use super::private::BackendOps;
     use super::*;
     use crate::Tape;
     use crate::backend::Backend;

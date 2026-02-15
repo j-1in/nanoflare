@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use crate::Result;
-use crate::dtype::{DType, FloatDType};
+use crate::dtype::DType;
 use crate::layout::TensorLayout;
 use crate::storage::TensorStorage;
 use crate::tensor::Tensor;
@@ -9,7 +9,36 @@ use crate::tensor::Tensor;
 pub mod cpu;
 pub mod cuda;
 
-pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
+pub(crate) mod private {
+    use super::Backend;
+    use crate::Result;
+    use crate::dtype::{DType, FloatDType};
+    use crate::tensor::Tensor;
+
+    #[doc(hidden)]
+    pub trait BackendOps<T: DType, B: Backend<T>> {
+        // Tensor Operations
+        fn neg(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
+        where
+            T: std::ops::Neg<Output = T>;
+        fn abs(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn sgn(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn exp(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
+        where
+            T: FloatDType;
+        fn log(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
+        where
+            T: FloatDType;
+        fn add(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn sub(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn mul(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn div(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn dot(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+        fn matmul(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
+    }
+}
+
+pub trait Backend<T: DType>: Debug + Send + Sync + Clone + private::BackendOps<T, Self> {
     type Storage: Debug + Clone + Send + Sync + TensorStorage<T>;
 
     // Constructors
@@ -24,25 +53,6 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone {
         Self: Backend<U>,
         T: num_traits::ToPrimitive,
         U: num_traits::NumCast;
-
-    // Tensor Operations
-    fn neg(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
-    where
-        T: std::ops::Neg<Output = T>;
-    fn abs(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn sgn(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn exp(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
-    where
-        T: FloatDType;
-    fn log(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
-    where
-        T: FloatDType;
-    fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn sub(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn mul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn div(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn dot(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
-    fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>>;
 
     /// Sum over specified dimensions of a Tensor
     ///
