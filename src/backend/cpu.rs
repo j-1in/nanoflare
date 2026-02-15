@@ -172,8 +172,12 @@ impl<T: DType> Backend<T> for CpuBackend {
         self.strided_binary_op(a, b, |x, y| x / y)
     }
 
+    fn dot(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        todo!("cpu dot with {a:?} and {b:?}")
+    }
+
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!()
+        todo!("cpu matmul with {a:?} and {b:?}")
     }
 
     fn sum_dim(
@@ -208,18 +212,15 @@ impl<T: DType> Backend<T> for CpuBackend {
             reduce_mask[d] = true;
         }
 
-        let out_shape: Vec<_> = shape
-            .as_slice()
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &s)| {
-                if reduce_mask[i] {
-                    if keepdim { Some(1) } else { None }
-                } else {
-                    Some(s)
-                }
-            })
-            .collect();
+        let out_shape: Vec<_> =
+            shape
+                .as_slice()
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &s)| {
+                    if reduce_mask[i] { if keepdim { Some(1) } else { None } } else { Some(s) }
+                })
+                .collect();
 
         // Fast path: contiguous layout and reduction over a suffix of dimensions
         let dims_is_suffix = {
@@ -476,8 +477,8 @@ impl CpuBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
     use crate::Tape;
+    use crate::backend::Backend;
 
     #[test]
     fn tensor_addition() {

@@ -428,6 +428,60 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for DivOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DotOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for DotOp {
+    fn name(&self) -> &str {
+        "Dot"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        todo!("Dot backward not implemented yet; \n{inputs:?}, \n{grad:?}, \n{backend:?}")
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Dot(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> BinaryOp<T, B> for DotOp {
+    fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self> {
+        Self::validate_shapes(a, b)?;
+        Ok(DotOp)
+    }
+
+    fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
+        let a_shape = a.layout().shape();
+        let b_shape = b.layout().shape();
+
+        if a_shape.len() != 1 || b_shape.len() != 1 {
+            return Err(Error::DotInvalidShape {
+                a_shape: a_shape.clone(),
+                b_shape: b_shape.clone(),
+            });
+        }
+
+        let a_dim = a_shape[0];
+        let b_dim = b_shape[0];
+        if a_dim != b_dim {
+            return Err(Error::DotDimensionMismatch {
+                a_dim,
+                b_dim,
+                a_shape: a_shape.clone(),
+                b_shape: b_shape.clone(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatMulOp {
     lhs_orig_shape: TensorShape,
     rhs_orig_shape: TensorShape,
@@ -444,7 +498,7 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MatMulOp {
         grad: &Tensor<T, B>,
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        todo!("MatMul backward not implemented yet")
+        todo!("MatMul backward not implemented yet; \n{inputs:?}, \n{grad:?}, \n{backend:?}")
     }
 
     fn to_optype(&self) -> OpType {
@@ -464,23 +518,45 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
     fn validate_shapes(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()> {
         let a_shape = a.layout().shape();
         let b_shape = b.layout().shape();
+        let a_rank = a_shape.len();
+        let b_rank = b_shape.len();
 
-        if a_shape.len() < 2 || b_shape.len() < 2 {
+        // `matmul` accepts matrix-matrix, matrix-vector, vector-matrix, and
+        // batched variants (NumPy/PyTorch-style), but not scalar operands.
+        if a_rank == 0 || b_rank == 0 || (a_rank == 1 && b_rank == 1) {
             return Err(Error::MatMulInvalidShape {
                 a_shape: a_shape.clone(),
                 b_shape: b_shape.clone(),
             });
         }
 
-        let a_last = a_shape[a_shape.len() - 1];
-        let b_second_last = b_shape[b_shape.len() - 2];
-        if a_last != b_second_last {
+        let a_last = a_shape[a_rank - 1];
+        let b_contract = if b_rank == 1 { b_shape[0] } else { b_shape[b_rank - 2] };
+        if a_last != b_contract {
             return Err(Error::MatMulDimensionMismatch {
                 a_last,
-                b_second_last,
+                b_second_last: b_contract,
                 a_shape: a_shape.clone(),
                 b_shape: b_shape.clone(),
             });
+        }
+
+        // Validate leading dimensions (batch dims) are broadcast compatible.
+        let a_batch = if a_rank <= 2 { &[][..] } else { &a_shape.as_slice()[..a_rank - 2] };
+        let b_batch = if b_rank <= 2 { &[][..] } else { &b_shape.as_slice()[..b_rank - 2] };
+
+        let max_rank = std::cmp::max(a_batch.len(), b_batch.len());
+
+        for i in 0..max_rank {
+            let a_dim = if i < a_batch.len() { a_batch[a_batch.len() - 1 - i] } else { 1 };
+            let b_dim = if i < b_batch.len() { b_batch[b_batch.len() - 1 - i] } else { 1 };
+
+            if a_dim != b_dim && a_dim != 1 && b_dim != 1 {
+                return Err(Error::LayoutMismatch {
+                    a: a_shape.clone(),
+                    b: b_shape.clone(),
+                });
+            }
         }
 
         Ok(())
@@ -510,6 +586,7 @@ pub enum OpType {
     Sub(SubOp),
     Mul(MulOp),
     Div(DivOp),
+    Dot(DotOp),
     MatMul(MatMulOp),
 }
 
@@ -540,17 +617,9 @@ where
     let mut out_rev = Vec::with_capacity(max_rank);
 
     for i in 0..max_rank {
-        let dim_a = if i < rank_a {
-            shape_a[rank_a - 1 - i]
-        } else {
-            1
-        };
+        let dim_a = if i < rank_a { shape_a[rank_a - 1 - i] } else { 1 };
 
-        let dim_b = if i < rank_b {
-            shape_b[rank_b - 1 - i]
-        } else {
-            1
-        };
+        let dim_b = if i < rank_b { shape_b[rank_b - 1 - i] } else { 1 };
 
         if dim_a != dim_b && dim_a != 1 && dim_b != 1 {
             return Err(Error::LayoutMismatch {
@@ -586,6 +655,7 @@ impl OpType {
             OpType::Sub(_) => "Sub",
             OpType::Mul(_) => "Mul",
             OpType::Div(_) => "Div",
+            OpType::Dot(_) => "Dot",
             OpType::MatMul(_) => "MatMul",
         }
     }
@@ -608,6 +678,7 @@ impl OpType {
             OpType::Sub(op) => op.backward(inputs, grad, backend),
             OpType::Mul(op) => op.backward(inputs, grad, backend),
             OpType::Div(op) => op.backward(inputs, grad, backend),
+            OpType::Dot(op) => op.backward(inputs, grad, backend),
             OpType::MatMul(op) => op.backward(inputs, grad, backend),
         }
     }
@@ -646,7 +717,7 @@ mod tests {
     #[test]
     fn matmul_validate_shapes_invalid_rank_errors() {
         let backend = Arc::new(CpuBackend::new());
-        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend.clone());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![]), backend.clone());
         let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3, 4]), backend);
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
@@ -679,6 +750,113 @@ mod tests {
         let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3, 4]), backend);
 
         assert!(MatMulOp::new(&a, &b).is_ok());
+    }
+
+    #[test]
+    fn matmul_validate_shapes_rejects_vector_vector() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend);
+
+        let err = MatMulOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::MatMulInvalidShape { .. } => {}
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn matmul_validate_shapes_accepts_matrix_vector() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend);
+
+        assert!(MatMulOp::new(&a, &b).is_ok());
+    }
+
+    #[test]
+    fn matmul_validate_shapes_accepts_vector_matrix() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3, 4]), backend);
+
+        assert!(MatMulOp::new(&a, &b).is_ok());
+    }
+
+    #[test]
+    fn matmul_validate_shapes_matrix_vector_dim_mismatch_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![4]), backend);
+
+        let err = MatMulOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::MatMulDimensionMismatch { a_last, b_second_last, .. } => {
+                assert_eq!(a_last, 3);
+                assert_eq!(b_second_last, 4);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn matmul_validate_shapes_batched_incompatible_leading_dims_error() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3, 4]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![5, 4, 6]), backend);
+
+        let err = MatMulOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::LayoutMismatch { .. } => {}
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn matmul_validate_shapes_batched_broadcastable_leading_dims_ok() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![1, 2, 3, 4]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![7, 1, 4, 5]), backend);
+
+        assert!(MatMulOp::new(&a, &b).is_ok());
+    }
+
+    #[test]
+    fn dot_validate_shapes_invalid_rank_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![2, 3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend);
+
+        let err = DotOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::DotInvalidShape { .. } => {}
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn dot_validate_shapes_dimension_mismatch_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![4]), backend);
+
+        let err = DotOp::new(&a, &b).unwrap_err();
+        match err {
+            crate::Error::DotDimensionMismatch { a_dim, b_dim, .. } => {
+                assert_eq!(a_dim, 3);
+                assert_eq!(b_dim, 4);
+            }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn dot_validate_shapes_accepts_matching_vectors() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend.clone());
+        let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend);
+
+        assert!(DotOp::new(&a, &b).is_ok());
     }
 
     #[test]

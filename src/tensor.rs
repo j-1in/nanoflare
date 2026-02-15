@@ -153,6 +153,7 @@ impl_binary_op!(
     trait: Mul, mul, MulOp::new, true;
     trait: Div, div, DivOp::new, true;
     fn: matmul, matmul, MatMulOp::new, false;
+    fn: dot, dot, DotOp::new, false;
 );
 
 pub enum UnbroadcastMode {
@@ -701,8 +702,7 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 mod tests {
     use super::*;
     use crate::backend::Backend;
-    use crate::i;
-    use crate::Tape;
+    use crate::{Tape, i};
 
     #[test]
     fn test_tensor_indexing() {

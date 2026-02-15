@@ -80,6 +80,10 @@ impl<T: DType> Backend<T> for CudaBackend {
         Err(Error::UnsupportedOperation { op: "div", backend: "cuda" })
     }
 
+    fn dot(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
+        Err(Error::UnsupportedOperation { op: "dot", backend: "cuda" })
+    }
+
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         Err(Error::UnsupportedOperation { op: "matmul", backend: "cuda" })
     }

@@ -57,6 +57,16 @@ pub enum Error {
         expected: usize,
         got:      usize,
     },
+    DotInvalidShape {
+        a_shape: TensorShape,
+        b_shape: TensorShape,
+    },
+    DotDimensionMismatch {
+        a_dim:   usize,
+        b_dim:   usize,
+        a_shape: TensorShape,
+        b_shape: TensorShape,
+    },
     MatMulInvalidShape {
         a_shape: TensorShape,
         b_shape: TensorShape,
@@ -145,11 +155,26 @@ impl fmt::Display for Error {
                     op, got, expected
                 )
             }
-            Error::MatMulInvalidShape { a_shape, b_shape } => {
-                // FIXME
+            Error::DotInvalidShape { a_shape, b_shape } => {
                 write!(
                     f,
-                    "matmul invalid shape: a shape {:?}, b shape {:?} (both must have rank >= 2)",
+                    "dot invalid shape: a shape {:?}, b shape {:?} (both must have rank 1)",
+                    a_shape, b_shape
+                )
+            }
+            Error::DotDimensionMismatch { a_dim, b_dim, a_shape, b_shape } => {
+                write!(
+                    f,
+                    "dot dimension mismatch: a dimension {} (shape {:?}) does not match b \
+                     dimension {} (shape {:?})",
+                    a_dim, a_shape, b_dim, b_shape
+                )
+            }
+            Error::MatMulInvalidShape { a_shape, b_shape } => {
+                write!(
+                    f,
+                    "matmul invalid shape: a shape {:?}, b shape {:?} (both must have rank >= 1, \
+                     and at least one must have rank >= 2; use dot for vector-vector)",
                     a_shape, b_shape
                 )
             }
@@ -161,8 +186,8 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "matmul dimension mismatch: a last dimension {} (shape {:?}) does not match b \
-                     second last dimension {} (shape {:?})",
+                    "matmul dimension mismatch: a contraction dimension {} (shape {:?}) does not \
+                     match b contraction dimension {} (shape {:?})",
                     a_last, a_shape, b_second_last, b_shape
                 )
             }
