@@ -40,7 +40,7 @@ impl<T: DType> CpuStorage<T> {
         CpuStorage(data)
     }
 
-    pub(crate) fn as_slice(&self) -> &[T] {
+    pub fn as_slice(&self) -> &[T] {
         &self.0
     }
 }

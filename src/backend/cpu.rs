@@ -232,13 +232,27 @@ impl<T: DType> private::BackendOps<T, CpuBackend> for CpuBackend {
     }
 
     fn dot(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        let a_shape = a.layout().shape();
-        let b_shape = b.layout().shape();
-
-        let n = a_shape[0];
+        let n = a.layout().shape()[0];
         let a_stride = a.layout().strides()[0];
+        let b_stride = b.layout().strides()[0];
+        let mut a_ptr = a.layout().offset();
+        let mut b_ptr = b.layout().offset();
 
-        todo!("cpu dot with {a:?} and {b:?}")
+        let a_storage = &a.storage()[..];
+        let b_storage = &b.storage()[..];
+
+        let mut acc = T::zero();
+        for _ in 0..n {
+            acc = acc + a_storage[a_ptr] * b_storage[b_ptr];
+            a_ptr += a_stride;
+            b_ptr += b_stride;
+        }
+
+        Ok(Tensor::from_parts(
+            self.from_vec(vec![acc]),
+            TensorLayout::new(vec![1]),
+            a.backend().clone(),
+        ))
     }
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
@@ -598,6 +612,67 @@ mod tests {
         for &v in out.storage().as_slice() {
             assert!((v - expected).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn dot_contiguous_vectors_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![4.0f32, 5.0, 6.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+
+        let out = backend.dot(&a, &b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[1]);
+        assert_eq!(out.storage().as_slice(), &[32.0]);
+    }
+
+    #[test]
+    fn dot_strided_vectors_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 99.0, 2.0, 99.0, 3.0, 99.0]),
+            TensorLayout::new(vec![6]),
+            backend.clone(),
+        )
+        .skip(0, 2)
+        .unwrap();
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![4.0f32, 77.0, 5.0, 77.0, 6.0, 77.0]),
+            TensorLayout::new(vec![6]),
+            backend.clone(),
+        )
+        .skip(0, 2)
+        .unwrap();
+
+        let out = backend.dot(&a, &b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[1]);
+        assert_eq!(out.storage().as_slice(), &[32.0]);
+    }
+
+    #[test]
+    fn dot_empty_vectors_returns_zero() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(Vec::<f32>::new()),
+            TensorLayout::new(vec![0]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(Vec::<f32>::new()),
+            TensorLayout::new(vec![0]),
+            backend.clone(),
+        );
+
+        let out = backend.dot(&a, &b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[1]);
+        assert_eq!(out.storage().as_slice(), &[0.0]);
     }
 
     #[test]
