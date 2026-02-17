@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 num-traits = "0.2.19"
 rayon = "1.11.0"
+
+[build-dependencies]
+cc = "1.2.56"

@@ -1,0 +1,23 @@
+CompileFlags:
+  Add:
+    - "--cuda-path=/nix/store/ryjlw1d3fw8nqavqnj6a9ivm448k3qr9-cuda-merged-12.8"
+    - "-ferror-limit=0"
+    - "-x"
+    - "cuda"
+    # Updated to Ampere/Ada (RTX 3000/4000). Adjust if needed.
+    - "--cuda-gpu-arch=sm_86"
+    - "-I/nix/store/ryjlw1d3fw8nqavqnj6a9ivm448k3qr9-cuda-merged-12.8/include"
+  Remove:
+    # strip CUDA fatbin args
+    - "-Xfatbin*"
+    # strip CUDA arch flags
+    - "-arch=native"
+    - "-gencode*"
+    - "--generate-code*"
+    # strip CUDA flags unknown to clang
+    - "-ccbin*"
+    - "--compiler-options*"
+    - "--expt-extended-lambda"
+    - "--expt-relaxed-constexpr"
+    - "-forward-unknown-to-host-compiler"
+    - "-Werror=cross-execution-space-call"

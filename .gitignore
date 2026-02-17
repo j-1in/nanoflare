@@ -1,1 +1,62 @@
 /target
+
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files (sometimes present in mixed projects)
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# CUDA-specific generated files
+*.i
+*.ii
+*.gpu
+*.ptx
+*.cubin
+*.fatbin
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.suo
+*.user
+*.ncb
+*.opensdf
+*.sdf
+
+# Build directories
+build/
+bin/
+obj/
+dist/
+
+# Other
+.cache/
+.direnv/
+*.bin
