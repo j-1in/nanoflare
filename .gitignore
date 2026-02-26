@@ -60,3 +60,4 @@ dist/
 .cache/
 .direnv/
 *.bin
+.dir-locals.el
