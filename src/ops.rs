@@ -531,7 +531,11 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
         }
 
         let a_last = a_shape[a_rank - 1];
-        let b_contract = if b_rank == 1 { b_shape[0] } else { b_shape[b_rank - 2] };
+        let b_contract = if b_rank == 1 {
+            b_shape[0]
+        } else {
+            b_shape[b_rank - 2]
+        };
         if a_last != b_contract {
             return Err(Error::MatMulDimensionMismatch {
                 a_last,
@@ -542,14 +546,30 @@ impl<T: DType, B: Backend<T>> BinaryOp<T, B> for MatMulOp {
         }
 
         // Validate leading dimensions (batch dims) are broadcast compatible.
-        let a_batch = if a_rank <= 2 { &[][..] } else { &a_shape.as_slice()[..a_rank - 2] };
-        let b_batch = if b_rank <= 2 { &[][..] } else { &b_shape.as_slice()[..b_rank - 2] };
+        let a_batch = if a_rank <= 2 {
+            &[][..]
+        } else {
+            &a_shape.as_slice()[..a_rank - 2]
+        };
+        let b_batch = if b_rank <= 2 {
+            &[][..]
+        } else {
+            &b_shape.as_slice()[..b_rank - 2]
+        };
 
         let max_rank = std::cmp::max(a_batch.len(), b_batch.len());
 
         for i in 0..max_rank {
-            let a_dim = if i < a_batch.len() { a_batch[a_batch.len() - 1 - i] } else { 1 };
-            let b_dim = if i < b_batch.len() { b_batch[b_batch.len() - 1 - i] } else { 1 };
+            let a_dim = if i < a_batch.len() {
+                a_batch[a_batch.len() - 1 - i]
+            } else {
+                1
+            };
+            let b_dim = if i < b_batch.len() {
+                b_batch[b_batch.len() - 1 - i]
+            } else {
+                1
+            };
 
             if a_dim != b_dim && a_dim != 1 && b_dim != 1 {
                 return Err(Error::LayoutMismatch {
@@ -617,9 +637,17 @@ where
     let mut out_rev = Vec::with_capacity(max_rank);
 
     for i in 0..max_rank {
-        let dim_a = if i < rank_a { shape_a[rank_a - 1 - i] } else { 1 };
+        let dim_a = if i < rank_a {
+            shape_a[rank_a - 1 - i]
+        } else {
+            1
+        };
 
-        let dim_b = if i < rank_b { shape_b[rank_b - 1 - i] } else { 1 };
+        let dim_b = if i < rank_b {
+            shape_b[rank_b - 1 - i]
+        } else {
+            1
+        };
 
         if dim_a != dim_b && dim_a != 1 && dim_b != 1 {
             return Err(Error::LayoutMismatch {

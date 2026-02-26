@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use super::Backend;
-use crate::backend::private;
+use crate::backend::{Backend, private};
 use crate::dtype::{DType, FloatDType};
 use crate::layout::{TensorLayout, TensorShape};
 use crate::storage::CpuStorage;
@@ -124,15 +123,18 @@ impl<T: DType> Backend<T> for CpuBackend {
             reduce_mask[d] = true;
         }
 
-        let out_shape: Vec<_> =
-            shape
-                .as_slice()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, &s)| {
-                    if reduce_mask[i] { if keepdim { Some(1) } else { None } } else { Some(s) }
-                })
-                .collect();
+        let out_shape: Vec<_> = shape
+            .as_slice()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &s)| {
+                if reduce_mask[i] {
+                    if keepdim { Some(1) } else { None }
+                } else {
+                    Some(s)
+                }
+            })
+            .collect();
 
         // Fast path: contiguous layout and reduction over a suffix of dimensions
         let dims_is_suffix = {

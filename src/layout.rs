@@ -531,7 +531,11 @@ impl TensorLayout {
 
         for i in 0..out_rank {
             let out_dim = out_shape[i];
-            let in_dim_opt = if i >= lead { Some(in_shape[i - lead]) } else { None };
+            let in_dim_opt = if i >= lead {
+                Some(in_shape[i - lead])
+            } else {
+                None
+            };
             let in_dim = in_dim_opt.unwrap_or(1);
 
             if in_dim != out_dim && in_dim != 1 {
@@ -542,7 +546,11 @@ impl TensorLayout {
             }
 
             let stride = if let Some(in_dim) = in_dim_opt {
-                if in_dim == 1 && out_dim != 1 { 0 } else { self.strides[i - lead] }
+                if in_dim == 1 && out_dim != 1 {
+                    0
+                } else {
+                    self.strides[i - lead]
+                }
             } else {
                 0
             };
