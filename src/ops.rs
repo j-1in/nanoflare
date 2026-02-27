@@ -265,6 +265,97 @@ impl<T: DType, B: Backend<T>> UnaryOp<T, B> for TransposeOp {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReshapeOp {
+    pub orig_shape: TensorShape,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for ReshapeOp {
+    fn name(&self) -> &str {
+        "Reshape"
+    }
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let grad_a = grad.reshape(self.orig_shape.as_slice())?;
+        Ok(vec![grad_a])
+    }
+    fn to_optype(&self) -> OpType {
+        OpType::Reshape(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for ReshapeOp {
+    fn new(a: &Tensor<T, B>) -> Result<Self> {
+        Ok(ReshapeOp {
+            orig_shape: a.layout().shape().clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PermuteOp {
+    pub inverse_indices: Vec<usize>,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for PermuteOp {
+    fn name(&self) -> &str {
+        "Permute"
+    }
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let grad_a = grad.permute(&self.inverse_indices)?;
+        Ok(vec![grad_a])
+    }
+    fn to_optype(&self) -> OpType {
+        OpType::Permute(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for PermuteOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(PermuteOp { inverse_indices: vec![] })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BroadcastToOp {
+    pub orig_shape: TensorShape,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for BroadcastToOp {
+    fn name(&self) -> &str {
+        "BroadcastTo"
+    }
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let grad_a = grad.unbroadcast_to(&self.orig_shape, UnbroadcastMode::Sum)?;
+        Ok(vec![grad_a])
+    }
+    fn to_optype(&self) -> OpType {
+        OpType::BroadcastTo(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for BroadcastToOp {
+    fn new(a: &Tensor<T, B>) -> Result<Self> {
+        Ok(BroadcastToOp {
+            orig_shape: a.layout().shape().clone(),
+        })
+    }
+}
+
 /// Trait representing a binary tensor operation.
 pub trait BinaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self>
@@ -529,7 +620,7 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MatMulOp {
         &self,
         inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
-        backend: &Arc<B>,
+        _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
         let a = inputs[0].detach();
         let b = inputs[1].detach();
@@ -539,13 +630,13 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MatMulOp {
 
         // Handle vector-matrix and matrix-vector cases by temporarily reshaping to 2D
         let a_2d = if a_rank == 1 {
-            a.reshape(vec![1, a.layout().shape()[0]])?
+            a._reshape(vec![1, a.layout().shape()[0]])?
         } else {
             a.clone()
         };
 
         let b_2d = if b_rank == 1 {
-            b.reshape(vec![b.layout().shape()[0], 1])?
+            b._reshape(vec![b.layout().shape()[0], 1])?
         } else {
             b.clone()
         };
@@ -553,8 +644,14 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MatMulOp {
         let a_2d_rank = a_2d.layout().shape().len();
         let b_2d_rank = b_2d.layout().shape().len();
 
-        let grad_a = grad.matmul(&b_2d.transpose(b_2d_rank - 2, b_2d_rank - 1)?)?;
-        let grad_b = a_2d.transpose(a_2d_rank - 2, a_2d_rank - 1)?.matmul(grad)?;
+        let mut b_2d_perm: Vec<usize> = (0..b_2d_rank).collect();
+        b_2d_perm.swap(b_2d_rank - 2, b_2d_rank - 1);
+
+        let mut a_2d_perm: Vec<usize> = (0..a_2d_rank).collect();
+        a_2d_perm.swap(a_2d_rank - 2, a_2d_rank - 1);
+
+        let grad_a = grad.matmul(&b_2d._permute(&b_2d_perm)?)?;
+        let grad_b = a_2d._permute(&a_2d_perm)?.matmul(grad)?;
 
         unbroadcast_binary_grads(grad_a, grad_b, &self.lhs_orig_shape, &self.rhs_orig_shape)
     }
@@ -667,6 +764,9 @@ pub enum OpType {
     Dot(DotOp),
     MatMul(MatMulOp),
     Transpose(TransposeOp),
+    Reshape(ReshapeOp),
+    Permute(PermuteOp),
+    BroadcastTo(BroadcastToOp),
 }
 
 pub(crate) fn broadcasted_shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
@@ -738,13 +838,16 @@ impl OpType {
             OpType::Sgn(_) => "Sgn",
             OpType::Exp(_) => "Exp",
             OpType::Log(_) => "Log",
-            OpType::Transpose(_) => "Transpose",
             OpType::Add(_) => "Add",
             OpType::Sub(_) => "Sub",
             OpType::Mul(_) => "Mul",
             OpType::Div(_) => "Div",
             OpType::Dot(_) => "Dot",
             OpType::MatMul(_) => "MatMul",
+            OpType::Transpose(_) => "Transpose",
+            OpType::Reshape(_) => "Reshape",
+            OpType::Permute(_) => "Permute",
+            OpType::BroadcastTo(_) => "BroadcastTo",
         }
     }
 
@@ -762,13 +865,16 @@ impl OpType {
             OpType::Sgn(op) => op.backward(inputs, grad, backend),
             OpType::Exp(op) => op.backward(inputs, grad, backend),
             OpType::Log(op) => op.backward(inputs, grad, backend),
-            OpType::Transpose(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
             OpType::Sub(op) => op.backward(inputs, grad, backend),
             OpType::Mul(op) => op.backward(inputs, grad, backend),
             OpType::Div(op) => op.backward(inputs, grad, backend),
             OpType::Dot(op) => op.backward(inputs, grad, backend),
             OpType::MatMul(op) => op.backward(inputs, grad, backend),
+            OpType::Transpose(op) => op.backward(inputs, grad, backend),
+            OpType::Reshape(op) => op.backward(inputs, grad, backend),
+            OpType::Permute(op) => op.backward(inputs, grad, backend),
+            OpType::BroadcastTo(op) => op.backward(inputs, grad, backend),
         }
     }
 }

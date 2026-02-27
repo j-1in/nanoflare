@@ -164,14 +164,14 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
                 let (a_view, a_promoted) = if a_rank == 1 {
                     let shape = self.layout().shape().as_slice();
-                    (self.reshape(vec![1, shape[0]])?, true)
+                    (self._reshape(vec![1, shape[0]])?, true)
                 } else {
                     (self.clone(), false)
                 };
 
                 let (b_view, b_promoted) = if b_rank == 1 {
                     let shape = rhs.layout().shape().as_slice();
-                    (rhs.reshape(vec![shape[0], 1])?, true)
+                    (rhs._reshape(vec![shape[0], 1])?, true)
                 } else {
                     (rhs.clone(), false)
                 };
@@ -213,8 +213,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 b_broadcast_shape.push(b_shape[b_rank_view - 2]);
                 b_broadcast_shape.push(b_shape[b_rank_view - 1]);
 
-                let a_bcast = a_view.broadcast_to(&a_broadcast_shape)?;
-                let b_bcast = b_view.broadcast_to(&b_broadcast_shape)?;
+                let a_bcast = a_view._broadcast_to(&a_broadcast_shape)?;
+                let b_bcast = b_view._broadcast_to(&b_broadcast_shape)?;
 
                 let mut out = self.binary_op(
                     &b_bcast,
@@ -387,9 +387,9 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad,
-            tape: self.tape.clone(),
-            node_id: self.node_id,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
         })
     }
 
@@ -603,7 +603,20 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         self.unary_op(op, |_, a| {
             let mut permuted_indices: Vec<usize> = (0..a.layout().shape().len()).collect();
             permuted_indices.swap(dim0, dim1);
-            a.permute(&permuted_indices)
+            a._permute(&permuted_indices)
+        })
+    }
+
+    pub(crate) fn _permute(&self, permuted_indices: &[usize]) -> Result<Self> {
+        let layout = self.layout.permute(permuted_indices)?;
+
+        Ok(Tensor {
+            layout,
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
+            requires_grad: false,
+            tape: None,
+            node_id: None,
         })
     }
 
@@ -614,16 +627,12 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     /// This is a wrapper around `TensorLayout::permute`.
     /// `Tensor`
     pub fn permute(&self, permuted_indices: &[usize]) -> Result<Self> {
-        let layout = self.layout.permute(permuted_indices)?;
-
-        Ok(Tensor {
-            layout,
-            storage: self.storage.clone(),
-            backend: self.backend.clone(),
-            requires_grad: self.requires_grad,
-            tape: self.tape.clone(),
-            node_id: self.node_id,
-        })
+        let mut inverse_indices = vec![0; permuted_indices.len()];
+        for (i, &p) in permuted_indices.iter().enumerate() {
+            inverse_indices[p] = i;
+        }
+        let op = PermuteOp { inverse_indices };
+        self.unary_op(op, |_, a| a._permute(permuted_indices))
     }
 
     /// Merge the dimensions in the specified inclusive range into a single
@@ -637,9 +646,9 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad,
-            tape: self.tape.clone(),
-            node_id: self.node_id,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
         })
     }
 
@@ -654,16 +663,16 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad,
-            tape: self.tape.clone(),
-            node_id: self.node_id,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
         })
     }
 
     /// Reshape the tensor layout to a new shape if it is contiguous in memory
     /// according to `TensorLayout::is_contiguous`. Otherwise, this operation
     /// should create a new contiguous copy and reshape that copy, TODO.
-    pub fn reshape(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
+    pub(crate) fn _reshape(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
         if self.layout.is_contiguous() {
             let layout = self.layout.reshape(shape)?;
 
@@ -671,13 +680,36 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
                 layout,
                 storage: self.storage.clone(),
                 backend: self.backend.clone(),
-                requires_grad: self.requires_grad,
-                tape: self.tape.clone(),
-                node_id: self.node_id,
+                requires_grad: false,
+                tape: None,
+                node_id: None,
             })
         } else {
             Err(Error::NonContiguousLayout { op: "reshape" })
         }
+    }
+
+    /// Reshape the tensor layout to a new shape if it is contiguous in memory
+    /// according to `TensorLayout::is_contiguous`. Otherwise, this operation
+    /// should create a new contiguous copy and reshape that copy, TODO.
+    pub fn reshape(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
+        let op = ReshapeOp {
+            orig_shape: self.layout.shape().clone(),
+        };
+        self.unary_op(op, |_, a| a._reshape(shape))
+    }
+
+    pub(crate) fn _broadcast_to(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
+        let layout = self.layout.broadcast_to(shape)?;
+
+        Ok(Tensor {
+            layout,
+            storage: self.storage.clone(),
+            backend: self.backend.clone(),
+            requires_grad: false,
+            tape: None,
+            node_id: None,
+        })
     }
 
     /// Broadcast the tensor layout to a new shape.
@@ -685,16 +717,10 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     /// This is a view-only operation; it does not copy data.
     /// This is a wrapper around `TensorLayout::broadcast_to`.
     pub fn broadcast_to(&self, shape: impl AsRef<[usize]>) -> Result<Self> {
-        let layout = self.layout.broadcast_to(shape)?;
-
-        Ok(Tensor {
-            layout,
-            storage: self.storage.clone(),
-            backend: self.backend.clone(),
-            requires_grad: self.requires_grad,
-            tape: self.tape.clone(),
-            node_id: self.node_id,
-        })
+        let op = BroadcastToOp {
+            orig_shape: self.layout.shape().clone(),
+        };
+        self.unary_op(op, |_, a| a._broadcast_to(shape))
     }
 
     pub fn unbroadcast_to(
@@ -781,9 +807,9 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             layout,
             storage: self.storage.clone(),
             backend: self.backend.clone(),
-            requires_grad: self.requires_grad,
-            tape: self.tape.clone(),
-            node_id: self.node_id,
+            requires_grad: false,
+            tape: None,
+            node_id: None,
         })
     }
 
