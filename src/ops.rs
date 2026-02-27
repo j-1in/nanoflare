@@ -232,6 +232,39 @@ where
     }
 }
 
+/// The transpose operation datatype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransposeOp {
+    pub dim0: usize,
+    pub dim1: usize,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for TransposeOp {
+    fn name(&self) -> &str {
+        "Transpose"
+    }
+
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let grad_a = grad.transpose(self.dim0, self.dim1)?;
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Transpose(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for TransposeOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(TransposeOp { dim0: 0, dim1: 1 })
+    }
+}
+
 /// Trait representing a binary tensor operation.
 pub trait BinaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self>
@@ -498,7 +531,32 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MatMulOp {
         grad: &Tensor<T, B>,
         backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        todo!("MatMul backward not implemented yet; \n{inputs:?}, \n{grad:?}, \n{backend:?}")
+        let a = inputs[0].detach();
+        let b = inputs[1].detach();
+
+        let a_rank = a.layout().shape().len();
+        let b_rank = b.layout().shape().len();
+
+        // Handle vector-matrix and matrix-vector cases by temporarily reshaping to 2D
+        let a_2d = if a_rank == 1 {
+            a.reshape(vec![1, a.layout().shape()[0]])?
+        } else {
+            a.clone()
+        };
+
+        let b_2d = if b_rank == 1 {
+            b.reshape(vec![b.layout().shape()[0], 1])?
+        } else {
+            b.clone()
+        };
+
+        let a_2d_rank = a_2d.layout().shape().len();
+        let b_2d_rank = b_2d.layout().shape().len();
+
+        let grad_a = grad.matmul(&b_2d.transpose(b_2d_rank - 2, b_2d_rank - 1)?)?;
+        let grad_b = a_2d.transpose(a_2d_rank - 2, a_2d_rank - 1)?.matmul(grad)?;
+
+        unbroadcast_binary_grads(grad_a, grad_b, &self.lhs_orig_shape, &self.rhs_orig_shape)
     }
 
     fn to_optype(&self) -> OpType {
@@ -608,6 +666,7 @@ pub enum OpType {
     Div(DivOp),
     Dot(DotOp),
     MatMul(MatMulOp),
+    Transpose(TransposeOp),
 }
 
 pub(crate) fn broadcasted_shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
@@ -679,6 +738,7 @@ impl OpType {
             OpType::Sgn(_) => "Sgn",
             OpType::Exp(_) => "Exp",
             OpType::Log(_) => "Log",
+            OpType::Transpose(_) => "Transpose",
             OpType::Add(_) => "Add",
             OpType::Sub(_) => "Sub",
             OpType::Mul(_) => "Mul",
@@ -702,6 +762,7 @@ impl OpType {
             OpType::Sgn(op) => op.backward(inputs, grad, backend),
             OpType::Exp(op) => op.backward(inputs, grad, backend),
             OpType::Log(op) => op.backward(inputs, grad, backend),
+            OpType::Transpose(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
             OpType::Sub(op) => op.backward(inputs, grad, backend),
             OpType::Mul(op) => op.backward(inputs, grad, backend),

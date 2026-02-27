@@ -49,7 +49,7 @@ macro_rules! impl_binary_op {
         impl_binary_op!($($rest)*);
     };
 
-    // Plain-named ops: "fn: matmul, matmul, MatMulOp::new, false;"
+    // Plain-named ops: "fn: dot, dot, DotOp::new, false;"
     (fn: $name:ident, $backend_method:ident, $op:expr, $broadcast:expr; $($rest:tt)*) => {
         impl<T: DType, B: Backend<T>> Tensor<T, B> {
             pub fn $name(&self, rhs: &Tensor<T, B>) -> Result<Self> {
@@ -152,9 +152,97 @@ impl_binary_op!(
     trait: Sub, sub, SubOp::new, true;
     trait: Mul, mul, MulOp::new, true;
     trait: Div, div, DivOp::new, true;
-    fn: matmul, matmul, MatMulOp::new, false;
     fn: dot, dot, DotOp::new, false;
 );
+
+impl<T: DType, B: Backend<T>> Tensor<T, B> {
+    pub fn matmul(&self, rhs: &Tensor<T, B>) -> Result<Self> {
+        match MatMulOp::new(self, rhs) {
+            Ok(op) => {
+                let a_rank = self.layout().shape().len();
+                let b_rank = rhs.layout().shape().len();
+
+                let (a_view, a_promoted) = if a_rank == 1 {
+                    let shape = self.layout().shape().as_slice();
+                    (self.reshape(vec![1, shape[0]])?, true)
+                } else {
+                    (self.clone(), false)
+                };
+
+                let (b_view, b_promoted) = if b_rank == 1 {
+                    let shape = rhs.layout().shape().as_slice();
+                    (rhs.reshape(vec![shape[0], 1])?, true)
+                } else {
+                    (rhs.clone(), false)
+                };
+
+                let a_shape = a_view.layout().shape();
+                let b_shape = b_view.layout().shape();
+                let a_rank_view = a_shape.len();
+                let b_rank_view = b_shape.len();
+
+                let a_batch_shape = &a_shape.as_slice()[..a_rank_view - 2];
+                let b_batch_shape = &b_shape.as_slice()[..b_rank_view - 2];
+
+                let batch_rank = std::cmp::max(a_batch_shape.len(), b_batch_shape.len());
+
+                let a_iter = a_batch_shape
+                    .iter()
+                    .rev()
+                    .copied()
+                    .chain(std::iter::repeat(1));
+                let b_iter = b_batch_shape
+                    .iter()
+                    .rev()
+                    .copied()
+                    .chain(std::iter::repeat(1));
+
+                let mut max_batch_shape: Vec<_> = a_iter
+                    .zip(b_iter)
+                    .take(batch_rank)
+                    .map(|(a, b)| a.max(b))
+                    .collect();
+
+                max_batch_shape.reverse();
+
+                let mut a_broadcast_shape = max_batch_shape.clone();
+                a_broadcast_shape.push(a_shape[a_rank_view - 2]);
+                a_broadcast_shape.push(a_shape[a_rank_view - 1]);
+
+                let mut b_broadcast_shape = max_batch_shape.clone();
+                b_broadcast_shape.push(b_shape[b_rank_view - 2]);
+                b_broadcast_shape.push(b_shape[b_rank_view - 1]);
+
+                let a_bcast = a_view.broadcast_to(&a_broadcast_shape)?;
+                let b_bcast = b_view.broadcast_to(&b_broadcast_shape)?;
+
+                let mut out = self.binary_op(
+                    &b_bcast,
+                    op,
+                    |backend, _, _| backend.matmul(&a_bcast, &b_bcast),
+                    false,
+                )?;
+
+                let m = a_broadcast_shape[a_broadcast_shape.len() - 2];
+                let n = b_broadcast_shape[b_broadcast_shape.len() - 1];
+
+                if a_promoted || b_promoted {
+                    let mut final_shape = max_batch_shape;
+                    if !a_promoted {
+                        final_shape.push(m);
+                    }
+                    if !b_promoted {
+                        final_shape.push(n);
+                    }
+                    out = out.reshape(final_shape)?;
+                }
+
+                Ok(out)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
 
 pub enum UnbroadcastMode {
     Sum,
@@ -201,6 +289,20 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             requires_grad: false,
             tape: None,
             node_id: None,
+        }
+    }
+
+    /// Detach the tensor from the autograd tape, returning a new `Tensor` with
+    /// the same data and layout but with `requires_grad` set to false and no
+    /// tape or node ID.
+    pub fn detach(&self) -> Self {
+        Tensor {
+            storage:       self.storage.clone(),
+            layout:        self.layout.clone(),
+            backend:       self.backend.clone(),
+            requires_grad: false,
+            tape:          None,
+            node_id:       None,
         }
     }
 
@@ -490,6 +592,19 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         }
 
         Ok(Gradients::new_from_map(grads))
+    }
+
+    /// Transposes the tensor by swapping two dimensions.
+    ///
+    /// This is a differentiable operation that records itself on the
+    /// computational tape.
+    pub fn transpose(&self, dim0: usize, dim1: usize) -> Result<Self> {
+        let op = TransposeOp { dim0, dim1 };
+        self.unary_op(op, |_, a| {
+            let mut permuted_indices: Vec<usize> = (0..a.layout().shape().len()).collect();
+            permuted_indices.swap(dim0, dim1);
+            a.permute(&permuted_indices)
+        })
     }
 
     // TODO: avoid unnecessary clone
@@ -914,5 +1029,148 @@ mod tests {
 
         let sgn_out = a.sgn().unwrap();
         assert_eq!(sgn_out.storage().as_slice(), &[0, 1, 1]);
+    }
+
+    #[test]
+    fn test_matmul_2d_x_2d() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        // 2x3
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        // 3x2
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0]),
+            TensorLayout::new(vec![3, 2]),
+            backend.clone(),
+        );
+
+        let out = a.matmul(&b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 2]);
+        assert_eq!(out.storage().as_slice(), &[58.0, 64.0, 139.0, 154.0]);
+    }
+
+    #[test]
+    fn test_matmul_1d_x_2d() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        // 2
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0]),
+            TensorLayout::new(vec![2]),
+            backend.clone(),
+        );
+        // 2x3
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![3.0f32, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+
+        let out = a.matmul(&b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[3]);
+        assert_eq!(out.storage().as_slice(), &[15.0, 18.0, 21.0]);
+    }
+
+    #[test]
+    fn test_matmul_2d_x_1d() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        // 2x3
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        // 3
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![7.0f32, 8.0, 9.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+
+        let out = a.matmul(&b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2]);
+        assert_eq!(out.storage().as_slice(), &[50.0, 122.0]);
+    }
+
+    #[test]
+    fn test_matmul_batched_3d_x_3d() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        // 2x2x3
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![
+                1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0,
+            ]),
+            TensorLayout::new(vec![2, 2, 3]),
+            backend.clone(),
+        );
+        // 2x3x2
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![
+                7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ]),
+            TensorLayout::new(vec![2, 3, 2]),
+            backend.clone(),
+        );
+
+        let out = a.matmul(&b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            out.storage().as_slice(),
+            &[58.0, 64.0, 139.0, 154.0, 58.0, 64.0, 139.0, 154.0]
+        );
+    }
+
+    #[test]
+    fn test_matmul_batched_broadcast_2d_x_3d() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        // 2x3
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            TensorLayout::new(vec![2, 3]),
+            backend.clone(),
+        );
+        // 2x3x2
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![
+                7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ]),
+            TensorLayout::new(vec![2, 3, 2]),
+            backend.clone(),
+        );
+
+        let out = a.matmul(&b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            out.storage().as_slice(),
+            &[58.0, 64.0, 139.0, 154.0, 58.0, 64.0, 139.0, 154.0]
+        );
+    }
+
+    #[test]
+    fn test_matmul_batched_broadcast_3d_x_2d() {
+        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        // 2x2x3
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![
+                1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0,
+            ]),
+            TensorLayout::new(vec![2, 2, 3]),
+            backend.clone(),
+        );
+        // 3x2
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0]),
+            TensorLayout::new(vec![3, 2]),
+            backend.clone(),
+        );
+
+        let out = a.matmul(&b).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            out.storage().as_slice(),
+            &[58.0, 64.0, 139.0, 154.0, 58.0, 64.0, 139.0, 154.0]
+        );
     }
 }

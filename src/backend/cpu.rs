@@ -258,7 +258,70 @@ impl<T: DType> private::BackendOps<T, CpuBackend> for CpuBackend {
     }
 
     fn matmul(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
-        todo!("cpu matmul with {a:?} and {b:?}")
+        let a_shape = a.layout().shape();
+        let b_shape = b.layout().shape();
+        let rank = a_shape.len();
+
+        let m = a_shape[rank - 2];
+        let k = a_shape[rank - 1];
+        let n = b_shape[rank - 1];
+
+        let mut out_shape = a_shape.as_slice()[..rank - 2].to_vec();
+        out_shape.push(m);
+        out_shape.push(n);
+
+        let out_layout = TensorLayout::new(out_shape.clone());
+        let mut out_data = vec![T::zero(); out_layout.shape().numel()];
+
+        let batch_shape = &a_shape.as_slice()[..rank - 2];
+        let num_batches = if batch_shape.is_empty() {
+            1
+        } else {
+            batch_shape.iter().product::<usize>()
+        };
+
+        let a_storage = &a.storage()[..];
+        let b_storage = &b.storage()[..];
+
+        let a_strides = a.layout().strides();
+        let b_strides = b.layout().strides();
+
+        let a_inner_strides = &a_strides[rank - 2..];
+        let b_inner_strides = &b_strides[rank - 2..];
+
+        let batch_layout = TensorLayout::new(batch_shape.to_vec());
+
+        for batch_idx in 0..num_batches {
+            let batch_indices = batch_layout.unravel_index(batch_idx)?;
+
+            let mut a_batch_idx = batch_indices.clone();
+            a_batch_idx.push(0);
+            a_batch_idx.push(0);
+            let a_base = a.layout().ravel_index(&a_batch_idx)?;
+
+            let mut b_batch_idx = batch_indices.clone();
+            b_batch_idx.push(0);
+            b_batch_idx.push(0);
+            let b_base = b.layout().ravel_index(&b_batch_idx)?;
+
+            let out_base = batch_idx * m * n;
+
+            self.cpu_gemm_2d(
+                m,
+                k,
+                n,
+                &a_storage[a_base..],
+                a_inner_strides,
+                &b_storage[b_base..],
+                b_inner_strides,
+                &mut out_data[out_base..],
+            );
+        }
+
+        let out_storage = self.from_vec(out_data);
+        let out_tensor = Tensor::from_parts(out_storage, out_layout, a.backend().clone());
+
+        Ok(out_tensor)
     }
 }
 
@@ -496,6 +559,36 @@ impl CpuBackend {
 
         let storage = self.from_vec(out);
         Ok(Tensor::from_parts(storage, out_layout, a.backend().clone()))
+    }
+
+    fn cpu_gemm_2d<T: DType>(
+        &self,
+        m: usize,
+        k: usize,
+        n: usize,
+        a_slice: &[T],
+        a_strides: &[usize],
+        b_slice: &[T],
+        b_strides: &[usize],
+        out_slice: &mut [T],
+    ) {
+        let rs_a = a_strides[0];
+        let cs_a = a_strides[1];
+        let rs_b = b_strides[0];
+        let cs_b = b_strides[1];
+
+        // Naive 2D Matrix Multiplication
+        for i in 0..m {
+            for j in 0..n {
+                let mut acc = T::zero();
+                for l in 0..k {
+                    let a_val = a_slice[i * rs_a + l * cs_a];
+                    let b_val = b_slice[l * rs_b + j * cs_b];
+                    acc = acc + a_val * b_val;
+                }
+                out_slice[i * n + j] = acc;
+            }
+        }
     }
 }
 
