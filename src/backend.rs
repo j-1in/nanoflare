@@ -72,4 +72,20 @@ pub trait Backend<T: DType>: Debug + Send + Sync + Clone + private::BackendOps<T
         dim: impl IntoIterator<Item = usize>,
         keepdim: bool,
     ) -> Result<Tensor<T, Self>>;
+
+    /// Mean over specified dimensions of a Tensor
+    fn mean_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>>;
+
+    /// Max over specified dimensions of a Tensor
+    fn max_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>>;
 }

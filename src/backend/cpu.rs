@@ -149,6 +149,47 @@ impl<T: DType> Backend<T> for CpuBackend {
         // General strided reduction
         self.sum_dim_strided(rank, &reduce_mask, layout, shape, &out_shape, a, keepdim)
     }
+
+    fn mean_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        let dims: Vec<usize> = dim.into_iter().collect();
+        let a_shape = a.layout().shape();
+
+        let mut elements_to_divide = 1;
+        for &d in &dims {
+            if d < a_shape.len() {
+                elements_to_divide *= a_shape[d];
+            } else {
+                return Err(Error::AxisOutOfBounds { axis: d, rank: a_shape.len() });
+            }
+        }
+
+        let sum_tensor = self.sum_dim(a, dims, keepdim)?;
+        let divisor = Tensor::scalar(
+            num_traits::cast::<f64, T>(1.0 / (elements_to_divide as f64)).ok_or_else(|| {
+                crate::error::Error::DTypeCastFailed {
+                    from: "f64",
+                    to:   std::any::type_name::<T>(),
+                }
+            })?,
+            a.backend().clone(),
+        );
+
+        crate::backend::private::BackendOps::mul(self, &sum_tensor, &divisor)
+    }
+
+    fn max_dim(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        self.max_dim_internal(a, dim, keepdim)
+    }
 }
 
 impl<T: DType> private::BackendOps<T, CpuBackend> for CpuBackend {
@@ -559,6 +600,151 @@ impl CpuBackend {
 
         let storage = self.from_vec(out);
         Ok(Tensor::from_parts(storage, out_layout, a.backend().clone()))
+    }
+
+    fn max_dim_internal<T: DType>(
+        &self,
+        a: &Tensor<T, Self>,
+        dim: impl IntoIterator<Item = usize>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        let dims: Vec<usize> = dim.into_iter().collect();
+        if dims.is_empty() {
+            return if keepdim {
+                Ok(a.clone())
+            } else {
+                let rank = a.layout().shape().len();
+                let perm: Vec<usize> = (0..rank).collect();
+                a._permute(&perm)
+            };
+        }
+
+        let shape = a.layout().shape();
+        let rank = shape.len();
+
+        let mut reduce_mask = vec![false; rank];
+        for d in dims {
+            if d >= rank {
+                return Err(Error::AxisOutOfBounds { axis: d, rank });
+            }
+            if reduce_mask[d] {
+                return Err(Error::DuplicateAxis { axis: d });
+            }
+            reduce_mask[d] = true;
+        }
+
+        let out_shape: Vec<usize> = shape
+            .as_slice()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &s)| {
+                if reduce_mask[i] {
+                    if keepdim { Some(1) } else { None }
+                } else {
+                    Some(s)
+                }
+            })
+            .collect();
+
+        self.max_dim_strided(
+            rank,
+            &reduce_mask,
+            a.layout(),
+            shape,
+            &out_shape,
+            a,
+            keepdim,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn max_dim_strided<T: DType>(
+        &self,
+        rank: usize,
+        reduce_mask: &[bool],
+        layout: &TensorLayout,
+        shape: &TensorShape,
+        out_shape: &[usize],
+        a: &Tensor<T, Self>,
+        keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        let out_layout = TensorLayout::new(out_shape.to_vec());
+        let mut out_data = Vec::with_capacity(out_layout.shape().numel());
+        let in_data = a.storage().as_slice();
+
+        for out_idx in 0..out_layout.shape().numel() {
+            let out_coord = out_layout.unravel_index(out_idx).unwrap();
+            let mut base_in_coord = vec![0; rank];
+
+            let mut j = 0;
+            for (i, is_reduced) in reduce_mask.iter().enumerate() {
+                if !is_reduced {
+                    base_in_coord[i] = if keepdim { out_coord[i] } else { out_coord[j] };
+                    j += 1;
+                }
+            }
+
+            let mut reduced_dims_lens = Vec::new();
+            for (i, is_reduced) in reduce_mask.iter().enumerate() {
+                if *is_reduced {
+                    reduced_dims_lens.push((i, shape[i]));
+                }
+            }
+
+            let mut max_val = num_traits::cast::<f64, T>(std::f64::NEG_INFINITY).ok_or_else(|| {
+                crate::error::Error::DTypeCastFailed {
+                    from: "f64",
+                    to:   std::any::type_name::<T>(),
+                }
+            })?;
+            let mut current_reduction_coord = vec![0; reduced_dims_lens.len()];
+
+            'outer: loop {
+                let mut in_coord = base_in_coord.clone();
+                for (idx, (dim_idx, _)) in reduced_dims_lens.iter().enumerate() {
+                    in_coord[*dim_idx] = current_reduction_coord[idx];
+                }
+
+                let in_idx = layout.ravel_index(&in_coord)?;
+                let val = in_data[in_idx];
+                
+                let val_f64 = val.to_f64().ok_or_else(|| crate::error::Error::DTypeCastFailed {
+                    from: std::any::type_name::<T>(),
+                    to:   "f64",
+                })?;
+                let max_f64 = max_val.to_f64().ok_or_else(|| crate::error::Error::DTypeCastFailed {
+                    from: std::any::type_name::<T>(),
+                    to:   "f64",
+                })?;
+                
+                if val_f64 > max_f64 {
+                    max_val = val;
+                }
+
+                for i in (0..reduced_dims_lens.len()).rev() {
+                    current_reduction_coord[i] += 1;
+                    if current_reduction_coord[i] < reduced_dims_lens[i].1 {
+                        break;
+                    }
+                    if i == 0 {
+                        break 'outer;
+                    }
+                    current_reduction_coord[i] = 0;
+                }
+                if reduced_dims_lens.is_empty() {
+                    break;
+                }
+            }
+            out_data.push(max_val);
+        }
+
+        let out_storage = Arc::new(CpuStorage::new(out_data));
+
+        Ok(Tensor::from_parts(
+            out_storage,
+            out_layout,
+            Arc::new(CpuBackend),
+        ))
     }
 
     fn cpu_gemm_2d<T: DType>(

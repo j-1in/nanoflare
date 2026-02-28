@@ -356,6 +356,168 @@ impl<T: DType, B: Backend<T>> UnaryOp<T, B> for BroadcastToOp {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SumOp {
+    pub axes:       Vec<usize>,
+    pub keepdim:    bool,
+    pub orig_shape: TensorShape,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for SumOp {
+    fn name(&self) -> &str {
+        "Sum"
+    }
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let mut expanded_shape = self.orig_shape.as_slice().to_vec();
+        for &axis in &self.axes {
+            expanded_shape[axis] = 1;
+        }
+
+        let grad_expanded = if self.keepdim {
+            grad.clone()
+        } else {
+            grad._reshape(&expanded_shape)?
+        };
+
+        let grad_a = grad_expanded._broadcast_to(self.orig_shape.as_slice())?;
+        Ok(vec![grad_a])
+    }
+    fn to_optype(&self) -> OpType {
+        OpType::Sum(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for SumOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        unreachable!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeanOp {
+    pub axes:       Vec<usize>,
+    pub keepdim:    bool,
+    pub orig_shape: TensorShape,
+    pub divisor:    usize,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for MeanOp {
+    fn name(&self) -> &str {
+        "Mean"
+    }
+    fn backward(
+        &self,
+        _inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        _backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let mut expanded_shape = self.orig_shape.as_slice().to_vec();
+        for &axis in &self.axes {
+            expanded_shape[axis] = 1;
+        }
+
+        let grad_expanded = if self.keepdim {
+            grad.clone()
+        } else {
+            grad._reshape(&expanded_shape)?
+        };
+
+        let grad_a = grad_expanded._broadcast_to(self.orig_shape.as_slice())?;
+        let scale = Tensor::scalar(
+            num_traits::cast::<f64, T>(1.0 / (self.divisor as f64)).ok_or_else(|| {
+                crate::error::Error::DTypeCastFailed {
+                    from: "f64",
+                    to:   std::any::type_name::<T>(),
+                }
+            })?,
+            grad.backend().clone(),
+        );
+        let grad_scaled = (&grad_a * &scale)?;
+
+        Ok(vec![grad_scaled])
+    }
+    fn to_optype(&self) -> OpType {
+        OpType::Mean(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for MeanOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        unreachable!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaxOp {
+    pub axes:       Vec<usize>,
+    pub keepdim:    bool,
+    pub orig_shape: TensorShape,
+}
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for MaxOp {
+    fn name(&self) -> &str {
+        "Max"
+    }
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = inputs[0].detach();
+
+        let mut expanded_shape = self.orig_shape.as_slice().to_vec();
+        for &axis in &self.axes {
+            expanded_shape[axis] = 1;
+        }
+
+        let grad_expanded = if self.keepdim {
+            grad.clone()
+        } else {
+            grad._reshape(&expanded_shape)?
+        };
+
+        // We recompute the forward pass locally to find the max values
+        let max_vals = backend.max_dim(&a, self.axes.clone(), true)?;
+        let max_bcast = max_vals._broadcast_to(self.orig_shape.as_slice())?;
+
+        // Creating a mask where a == max_bcast
+        let diff = (&a - &max_bcast)?;
+        let abs_diff = diff.abs()?;
+        let one_tensor = Tensor::scalar(
+            num_traits::cast::<f64, T>(1.0).ok_or_else(|| crate::error::Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
+            })?,
+            backend.clone(),
+        );
+        let mask = (&one_tensor - &abs_diff.sgn()?)?;
+
+        // Normalize mask across the reduced dimensions (in case of ties)
+        let mask_sum = mask.sum_dim(self.axes.clone(), true)?;
+        let normalized_mask = (&mask / &mask_sum._broadcast_to(self.orig_shape.as_slice())?)?;
+
+        let grad_a_expanded = grad_expanded._broadcast_to(self.orig_shape.as_slice())?;
+        let grad_a = (&grad_a_expanded * &normalized_mask)?;
+
+        Ok(vec![grad_a])
+    }
+    fn to_optype(&self) -> OpType {
+        OpType::Max(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for MaxOp {
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        unreachable!()
+    }
+}
+
 /// Trait representing a binary tensor operation.
 pub trait BinaryOp<T: DType, B: Backend<T>>: TensorOp<T, B> {
     fn new(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Self>
@@ -767,6 +929,9 @@ pub enum OpType {
     Reshape(ReshapeOp),
     Permute(PermuteOp),
     BroadcastTo(BroadcastToOp),
+    Sum(SumOp),
+    Mean(MeanOp),
+    Max(MaxOp),
 }
 
 pub(crate) fn broadcasted_shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
@@ -848,6 +1013,9 @@ impl OpType {
             OpType::Reshape(_) => "Reshape",
             OpType::Permute(_) => "Permute",
             OpType::BroadcastTo(_) => "BroadcastTo",
+            OpType::Sum(_) => "Sum",
+            OpType::Mean(_) => "Mean",
+            OpType::Max(_) => "Max",
         }
     }
 
@@ -875,6 +1043,9 @@ impl OpType {
             OpType::Reshape(op) => op.backward(inputs, grad, backend),
             OpType::Permute(op) => op.backward(inputs, grad, backend),
             OpType::BroadcastTo(op) => op.backward(inputs, grad, backend),
+            OpType::Sum(op) => op.backward(inputs, grad, backend),
+            OpType::Mean(op) => op.backward(inputs, grad, backend),
+            OpType::Max(op) => op.backward(inputs, grad, backend),
         }
     }
 }

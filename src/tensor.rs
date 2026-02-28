@@ -265,6 +265,13 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         }
     }
 
+    /// Create a scalar tensor.
+    pub fn scalar(val: T, backend: Arc<B>) -> Self {
+        let layout = TensorLayout::new(vec![]);
+        let storage = backend.from_vec(vec![val]);
+        Self::from_parts(storage, layout, backend)
+    }
+
     /// Create a new tensor filled with ones, given a specific layout and
     /// backend.
     pub fn ones(layout: TensorLayout, backend: Arc<B>) -> Self {
@@ -595,9 +602,6 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     }
 
     /// Transposes the tensor by swapping two dimensions.
-    ///
-    /// This is a differentiable operation that records itself on the
-    /// computational tape.
     pub fn transpose(&self, dim0: usize, dim1: usize) -> Result<Self> {
         let op = TransposeOp { dim0, dim1 };
         self.unary_op(op, |_, a| {
@@ -832,10 +836,50 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
     /// Sum the tensor along specified dimensions, optionally keeping the
     /// reduced dimensions.
-    ///
-    /// This is a wrapper around the backend's `sum_dim` method.
     pub fn sum_dim(&self, dim: impl IntoIterator<Item = usize>, keepdim: bool) -> Result<Self> {
-        self.backend().sum_dim(self, dim, keepdim)
+        let axes: Vec<usize> = dim.into_iter().collect();
+        let op = SumOp {
+            axes: axes.clone(),
+            keepdim,
+            orig_shape: self.layout.shape().clone(),
+        };
+        self.unary_op(op, |backend, a| backend.sum_dim(a, axes, keepdim))
+    }
+
+    /// Mean the tensor along specified dimensions, optionally keeping the
+    /// reduced dimensions.
+    pub fn mean_dim(&self, dim: impl IntoIterator<Item = usize>, keepdim: bool) -> Result<Self> {
+        let axes: Vec<usize> = dim.into_iter().collect();
+        let a_shape = self.layout.shape();
+
+        let mut divisor = 1;
+        for &d in &axes {
+            if d < a_shape.len() {
+                divisor *= a_shape[d];
+            } else {
+                return Err(Error::AxisOutOfBounds { axis: d, rank: a_shape.len() });
+            }
+        }
+
+        let op = MeanOp {
+            axes: axes.clone(),
+            keepdim,
+            orig_shape: self.layout.shape().clone(),
+            divisor,
+        };
+        self.unary_op(op, |backend, a| backend.mean_dim(a, axes, keepdim))
+    }
+
+    /// Max the tensor along specified dimensions, optionally keeping the
+    /// reduced dimensions.
+    pub fn max_dim(&self, dim: impl IntoIterator<Item = usize>, keepdim: bool) -> Result<Self> {
+        let axes: Vec<usize> = dim.into_iter().collect();
+        let op = MaxOp {
+            axes: axes.clone(),
+            keepdim,
+            orig_shape: self.layout.shape().clone(),
+        };
+        self.unary_op(op, |backend, a| backend.max_dim(a, axes, keepdim))
     }
 }
 

@@ -61,6 +61,24 @@ impl<T: DType> Backend<T> for CudaBackend {
 
         Err(Error::UnsupportedOperation { op: "sum_dim", backend: "cuda" })
     }
+
+    fn mean_dim(
+        &self,
+        _a: &Tensor<T, Self>,
+        _dim: impl IntoIterator<Item = usize>,
+        _keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        Err(Error::UnsupportedOperation { op: "mean_dim", backend: "cuda" })
+    }
+
+    fn max_dim(
+        &self,
+        _a: &Tensor<T, Self>,
+        _dim: impl IntoIterator<Item = usize>,
+        _keepdim: bool,
+    ) -> Result<Tensor<T, Self>> {
+        Err(Error::UnsupportedOperation { op: "max_dim", backend: "cuda" })
+    }
 }
 
 impl<T: DType> private::BackendOps<T, CudaBackend> for CudaBackend {

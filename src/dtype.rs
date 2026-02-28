@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Add, Div, Mul, Sub};
 
-use num_traits::{Float, One, Zero};
+use num_traits::{Float, FromPrimitive, NumCast, One, ToPrimitive, Zero};
 
 // Ensure the arithmetic operators return the same concrete type T (Output =
 // Self).
@@ -12,6 +12,9 @@ pub trait DType:
     + PartialEq
     + Zero
     + One
+    + NumCast
+    + FromPrimitive
+    + ToPrimitive
     + Send
     + Sync
     + Abs

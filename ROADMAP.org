@@ -23,7 +23,8 @@ This document outlines the development plan for ~nanoflare~, a lightweight Rust 
 ** Phase 2: CPU Efficiency & Parallelism
 - [X] *Broadcasting*: Implement NumPy-style broadcasting for binary operations.
 - [-] *More operations*: more tensor operations:
-    - [ ] Matrix Multiplication
+    - [X] Matrix Multiplication
+    - [ ] Activation functions
 - [ ] *rayon Integration*: Parallelize ~CpuBackend~ operations using ~rayon~ to utilize all CPU cores.
 - [ ] *Optimized Matrix Multiplication*: Implement tiling/blocking and parallelization for ~matmul~.
 - [ ] *Reliability*: Improve error handling coverage and unit tests for edge cases.
