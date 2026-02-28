@@ -733,8 +733,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
         mode: UnbroadcastMode,
     ) -> Result<Self>
     where
-        T: crate::dtype::DType,
-        B: crate::backend::Backend<T>,
+        T: DType,
+        B: Backend<T>,
     {
         match mode {
             UnbroadcastMode::Sum => Ok(self.unbroadcast_with_sum(orig_shape)?),
@@ -748,8 +748,8 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
 
     fn unbroadcast_with_sum(&self, target_shape: impl AsRef<[usize]>) -> Result<Self>
     where
-        T: crate::dtype::DType,
-        B: crate::backend::Backend<T>,
+        T: DType,
+        B: Backend<T>,
     {
         let src_shape = self.layout.shape().as_slice();
         let target_shape = target_shape.as_ref();
@@ -964,11 +964,12 @@ impl<T: FloatDType, B: Backend<T>> Tensor<T, B> {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::backend::cpu::CpuBackend;
     use crate::{Tape, i};
 
     #[test]
     fn test_tensor_indexing() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend);
+        let backend = Arc::new(CpuBackend);
         let layout = TensorLayout::new(vec![2, 3]);
         let tensor = Tensor::<f32, _>::ones(layout, backend);
 
@@ -991,7 +992,7 @@ mod tests {
 
     #[test]
     fn reshape_non_contiguous_layout_errors() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3]), backend);
         let non_contiguous = t.permute(&[1, 0]).unwrap();
         let err = non_contiguous.reshape([6]).unwrap_err();
@@ -1004,11 +1005,8 @@ mod tests {
 
     #[test]
     fn reduction_axes_for_unbroadcast_errors_when_src_rank_is_smaller() {
-        let err = Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
-            &[3],
-            &[2, 3],
-        )
-        .unwrap_err();
+        let err =
+            Tensor::<f32, CpuBackend>::reduction_axes_for_unbroadcast(&[3], &[2, 3]).unwrap_err();
 
         match err {
             Error::ShapeMismatch { expected, got } => {
@@ -1021,11 +1019,8 @@ mod tests {
 
     #[test]
     fn reduction_axes_for_unbroadcast_errors_on_incompatible_shapes() {
-        let err = Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
-            &[2, 4, 3],
-            &[2, 2, 3],
-        )
-        .unwrap_err();
+        let err = Tensor::<f32, CpuBackend>::reduction_axes_for_unbroadcast(&[2, 4, 3], &[2, 2, 3])
+            .unwrap_err();
 
         match err {
             Error::ShapeMismatch { expected, got } => {
@@ -1038,25 +1033,20 @@ mod tests {
 
     #[test]
     fn reduction_axes_for_unbroadcast_returns_expected_axes() {
-        let axes = Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
-            &[2, 3, 4],
-            &[2, 1, 4],
-        )
-        .unwrap();
+        let axes =
+            Tensor::<f32, CpuBackend>::reduction_axes_for_unbroadcast(&[2, 3, 4], &[2, 1, 4])
+                .unwrap();
         assert_eq!(axes, vec![1]);
 
         let axes_with_leading =
-            Tensor::<f32, crate::backend::cpu::CpuBackend>::reduction_axes_for_unbroadcast(
-                &[5, 2, 3, 4],
-                &[2, 1, 4],
-            )
-            .unwrap();
+            Tensor::<f32, CpuBackend>::reduction_axes_for_unbroadcast(&[5, 2, 3, 4], &[2, 1, 4])
+                .unwrap();
         assert_eq!(axes_with_leading, vec![0, 2]);
     }
 
     #[test]
     fn unbroadcast_to_sum_reduces_leading_axis() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let storage = backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let t = Tensor::from_parts(storage, TensorLayout::new(vec![2, 3]), backend);
 
@@ -1067,7 +1057,7 @@ mod tests {
 
     #[test]
     fn unbroadcast_to_sum_preserves_singleton_target_dimensions() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3, 4]), backend);
 
         let out = t.unbroadcast_to([2, 1, 4], UnbroadcastMode::Sum).unwrap();
@@ -1077,7 +1067,7 @@ mod tests {
 
     #[test]
     fn unbroadcast_to_sum_errors_on_shape_mismatch() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3, 4]), backend);
 
         let err = t
@@ -1094,7 +1084,7 @@ mod tests {
 
     #[test]
     fn unbroadcast_to_mean_reports_unsupported_operation() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let t = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3]), backend);
 
         let err = t.unbroadcast_to([3], UnbroadcastMode::Mean).unwrap_err();
@@ -1109,8 +1099,8 @@ mod tests {
 
     #[test]
     fn neg_for_reference_tracks_autograd() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
-        let tape = Arc::new(Tape::<f32, crate::backend::cpu::CpuBackend>::new());
+        let backend = Arc::new(CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, CpuBackend>::new());
         let a = Tensor::from_parts(
             backend.from_vec(vec![2.0f32, -3.0]),
             TensorLayout::new(vec![2]),
@@ -1128,8 +1118,8 @@ mod tests {
 
     #[test]
     fn abs_backward_matches_signum() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
-        let tape = Arc::new(Tape::<f32, crate::backend::cpu::CpuBackend>::new());
+        let backend = Arc::new(CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, CpuBackend>::new());
         let a = Tensor::from_parts(
             backend.from_vec(vec![-2.0f32, 0.0, 3.0]),
             TensorLayout::new(vec![3]),
@@ -1146,8 +1136,8 @@ mod tests {
 
     #[test]
     fn sgn_backward_returns_zero_subgradient() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
-        let tape = Arc::new(Tape::<f32, crate::backend::cpu::CpuBackend>::new());
+        let backend = Arc::new(CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, CpuBackend>::new());
         let a = Tensor::from_parts(
             backend.from_vec(vec![-2.0f32, 0.0, 3.0]),
             TensorLayout::new(vec![3]),
@@ -1164,7 +1154,7 @@ mod tests {
 
     #[test]
     fn abs_and_sgn_work_for_unsigned_tensors() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         let a = Tensor::from_parts(
             backend.from_vec(vec![0u32, 4, 9]),
             TensorLayout::new(vec![3]),
@@ -1180,7 +1170,7 @@ mod tests {
 
     #[test]
     fn test_matmul_2d_x_2d() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         // 2x3
         let a = Tensor::from_parts(
             backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
@@ -1201,7 +1191,7 @@ mod tests {
 
     #[test]
     fn test_matmul_1d_x_2d() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         // 2
         let a = Tensor::from_parts(
             backend.from_vec(vec![1.0f32, 2.0]),
@@ -1222,7 +1212,7 @@ mod tests {
 
     #[test]
     fn test_matmul_2d_x_1d() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         // 2x3
         let a = Tensor::from_parts(
             backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
@@ -1243,7 +1233,7 @@ mod tests {
 
     #[test]
     fn test_matmul_batched_3d_x_3d() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         // 2x2x3
         let a = Tensor::from_parts(
             backend.from_vec(vec![
@@ -1271,7 +1261,7 @@ mod tests {
 
     #[test]
     fn test_matmul_batched_broadcast_2d_x_3d() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         // 2x3
         let a = Tensor::from_parts(
             backend.from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]),
@@ -1297,7 +1287,7 @@ mod tests {
 
     #[test]
     fn test_matmul_batched_broadcast_3d_x_2d() {
-        let backend = Arc::new(crate::backend::cpu::CpuBackend::new());
+        let backend = Arc::new(CpuBackend::new());
         // 2x2x3
         let a = Tensor::from_parts(
             backend.from_vec(vec![
@@ -1319,5 +1309,84 @@ mod tests {
             out.storage().as_slice(),
             &[58.0, 64.0, 139.0, 154.0, 58.0, 64.0, 139.0, 154.0]
         );
+    }
+
+    #[test]
+    fn test_sum_dim() {
+        let backend = Arc::new(CpuBackend);
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let storage = backend.from_vec(data);
+        let a = Tensor::from_parts(storage, TensorLayout::new(vec![2, 3]), backend.clone());
+        let a_sum = a.sum_dim(vec![1], false).unwrap();
+        assert_eq!(a_sum.layout().shape().as_slice(), &[2]);
+        let expected = [6.0f32, 15.0];
+        assert_eq!(a_sum.storage().as_slice(), &expected);
+    }
+
+    #[test]
+    fn test_mean_dim() {
+        let backend = Arc::new(CpuBackend);
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let storage = backend.from_vec(data);
+        let a = Tensor::from_parts(storage, TensorLayout::new(vec![2, 3]), backend.clone());
+        let a_mean = a.mean_dim(vec![1], false).unwrap();
+        assert_eq!(a_mean.layout().shape().as_slice(), &[2]);
+        let expected = [2.0f32, 5.0];
+        assert_eq!(a_mean.storage().as_slice(), &expected);
+    }
+
+    #[test]
+    fn test_max_dim() {
+        let backend = Arc::new(CpuBackend);
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let storage = backend.from_vec(data);
+        let a = Tensor::from_parts(storage, TensorLayout::new(vec![2, 3]), backend.clone());
+        let a_max = a.max_dim(vec![1], false).unwrap();
+        assert_eq!(a_max.layout().shape().as_slice(), &[2]);
+        let expected = [3.0f32, 6.0];
+        assert_eq!(a_max.storage().as_slice(), &expected);
+    }
+
+    #[test]
+    fn test_randn_initialization() {
+        let backend = Arc::new(CpuBackend);
+        let a = Tensor::<f32, _>::randn(vec![2, 3], backend.clone()).unwrap();
+        assert_eq!(a.layout().shape().as_slice(), &[2, 3]);
+        assert_eq!(a.layout().shape().numel(), 6);
+    }
+
+    #[test]
+    fn test_rand_uniform_initialization() {
+        let backend = Arc::new(CpuBackend);
+        let a = Tensor::<f32, _>::rand_uniform(vec![2, 3], 2.0, backend.clone()).unwrap();
+        assert_eq!(a.layout().shape().as_slice(), &[2, 3]);
+        let data = a.storage().as_slice();
+        for &val in data {
+            assert!(val >= -2.0 && val <= 2.0);
+        }
+    }
+
+    #[test]
+    fn test_kaiming_uniform_initialization() {
+        let backend = Arc::new(CpuBackend);
+        let a = Tensor::<f32, _>::kaiming_uniform(vec![10, 10], backend.clone()).unwrap();
+        assert_eq!(a.layout().shape().as_slice(), &[10, 10]);
+        let data = a.storage().as_slice();
+        let bound = (3.0_f32 / 10.0).sqrt();
+        for &val in data {
+            assert!(val >= -bound - 1e-5 && val <= bound + 1e-5);
+        }
+    }
+
+    #[test]
+    fn test_xavier_uniform_initialization() {
+        let backend = Arc::new(CpuBackend);
+        let a = Tensor::<f32, _>::xavier_uniform(vec![10, 10], backend.clone()).unwrap();
+        assert_eq!(a.layout().shape().as_slice(), &[10, 10]);
+        let data = a.storage().as_slice();
+        let bound = (6.0_f32 / 20.0).sqrt();
+        for &val in data {
+            assert!(val >= -bound - 1e-5 && val <= bound + 1e-5);
+        }
     }
 }

@@ -430,7 +430,7 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MeanOp {
         let grad_a = grad_expanded._broadcast_to(self.orig_shape.as_slice())?;
         let scale = Tensor::scalar(
             num_traits::cast::<f64, T>(1.0 / (self.divisor as f64)).ok_or_else(|| {
-                crate::error::Error::DTypeCastFailed {
+                Error::DTypeCastFailed {
                     from: "f64",
                     to:   std::any::type_name::<T>(),
                 }
@@ -490,11 +490,9 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MaxOp {
         let diff = (&a - &max_bcast)?;
         let abs_diff = diff.abs()?;
         let one_tensor = Tensor::scalar(
-            num_traits::cast::<f64, T>(1.0).ok_or_else(|| {
-                crate::error::Error::DTypeCastFailed {
-                    from: "f64",
-                    to:   std::any::type_name::<T>(),
-                }
+            num_traits::cast::<f64, T>(1.0).ok_or_else(|| Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
             })?,
             backend.clone(),
         );
@@ -938,8 +936,8 @@ pub enum OpType {
 
 pub(crate) fn broadcasted_shapes_match<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<()>
 where
-    T: crate::dtype::DType,
-    B: crate::backend::Backend<T>,
+    T: DType,
+    B: Backend<T>,
 {
     let _ = broadcasted_shape(a, b)?;
     Ok(())
@@ -949,8 +947,8 @@ where
 /// broadcasting.
 pub(crate) fn broadcasted_shape<T, B>(a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<TensorShape>
 where
-    T: crate::dtype::DType,
-    B: crate::backend::Backend<T>,
+    T: DType,
+    B: Backend<T>,
 {
     let shape_a = a.layout().shape();
     let shape_b = b.layout().shape();
@@ -1077,7 +1075,7 @@ mod tests {
         let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![4, 3]), backend.clone());
         let err = broadcasted_shape(&a, &b).unwrap_err();
         match err {
-            crate::Error::LayoutMismatch { .. } => {}
+            Error::LayoutMismatch { .. } => {}
             _ => panic!("unexpected error variant"),
         }
     }
@@ -1090,7 +1088,7 @@ mod tests {
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::MatMulInvalidShape { .. } => {}
+            Error::MatMulInvalidShape { .. } => {}
             _ => panic!("unexpected error variant"),
         }
     }
@@ -1103,7 +1101,7 @@ mod tests {
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::MatMulDimensionMismatch { a_last, b_second_last, .. } => {
+            Error::MatMulDimensionMismatch { a_last, b_second_last, .. } => {
                 assert_eq!(a_last, 3);
                 assert_eq!(b_second_last, 4);
             }
@@ -1128,7 +1126,7 @@ mod tests {
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::MatMulInvalidShape { .. } => {}
+            Error::MatMulInvalidShape { .. } => {}
             _ => panic!("unexpected error variant"),
         }
     }
@@ -1159,7 +1157,7 @@ mod tests {
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::MatMulDimensionMismatch { a_last, b_second_last, .. } => {
+            Error::MatMulDimensionMismatch { a_last, b_second_last, .. } => {
                 assert_eq!(a_last, 3);
                 assert_eq!(b_second_last, 4);
             }
@@ -1175,7 +1173,7 @@ mod tests {
 
         let err = MatMulOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::LayoutMismatch { .. } => {}
+            Error::LayoutMismatch { .. } => {}
             _ => panic!("unexpected error variant"),
         }
     }
@@ -1197,7 +1195,7 @@ mod tests {
 
         let err = DotOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::DotInvalidShape { .. } => {}
+            Error::DotInvalidShape { .. } => {}
             _ => panic!("unexpected error variant"),
         }
     }
@@ -1210,7 +1208,7 @@ mod tests {
 
         let err = DotOp::new(&a, &b).unwrap_err();
         match err {
-            crate::Error::DotDimensionMismatch { a_dim, b_dim, .. } => {
+            Error::DotDimensionMismatch { a_dim, b_dim, .. } => {
                 assert_eq!(a_dim, 3);
                 assert_eq!(b_dim, 4);
             }
@@ -1373,5 +1371,64 @@ mod tests {
         {
             assert!((got - expected).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn test_sum_op_backward() {
+        let backend = Arc::new(CpuBackend);
+        let a = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3]), backend.clone());
+        let op = SumOp {
+            axes:       vec![1],
+            keepdim:    false,
+            orig_shape: a.layout().shape().clone(),
+        };
+        let grad = Tensor::<f32, _>::ones(TensorLayout::new(vec![2]), backend.clone());
+        let out = op.backward(&[a], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        assert_eq!(out[0].layout().strides(), &[1, 0]);
+        let expected = [1.0f32; 2];
+        assert_eq!(out[0].storage().as_slice(), &expected);
+    }
+
+    #[test]
+    fn test_mean_op_backward() {
+        let backend = Arc::new(CpuBackend);
+        let a = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 3]), backend.clone());
+        let op = MeanOp {
+            axes:       vec![1],
+            keepdim:    false,
+            orig_shape: a.layout().shape().clone(),
+            divisor:    3,
+        };
+        let grad = Tensor::<f32, _>::ones(TensorLayout::new(vec![2]), backend.clone());
+        let out = op.backward(&[a], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        let expected = [1.0f32 / 3.0; 6];
+        for (got, exp) in out[0].storage().as_slice().iter().zip(expected.iter()) {
+            assert!((got - exp).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_max_op_backward() {
+        let backend = Arc::new(CpuBackend);
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let storage = backend.from_vec(data);
+        let a = Tensor::from_parts(storage, TensorLayout::new(vec![2, 3]), backend.clone());
+        let op = MaxOp {
+            axes:       vec![1],
+            keepdim:    false,
+            orig_shape: a.layout().shape().clone(),
+        };
+        let grad_data = vec![2.0f32, 2.0];
+        let grad_storage = backend.from_vec(grad_data);
+        let grad = Tensor::from_parts(grad_storage, TensorLayout::new(vec![2]), backend.clone());
+        let out = op.backward(&[a], &grad, &backend).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].layout().shape().as_slice(), &[2, 3]);
+        let expected = [0.0f32, 0.0, 2.0, 0.0, 0.0, 2.0];
+        assert_eq!(out[0].storage().as_slice(), &expected);
     }
 }

@@ -171,7 +171,7 @@ impl<T: DType> Backend<T> for CpuBackend {
         let sum_tensor = self.sum_dim(a, dims, keepdim)?;
         let divisor = Tensor::scalar(
             num_traits::cast::<f64, T>(1.0 / (elements_to_divide as f64)).ok_or_else(|| {
-                crate::error::Error::DTypeCastFailed {
+                Error::DTypeCastFailed {
                     from: "f64",
                     to:   std::any::type_name::<T>(),
                 }
@@ -179,7 +179,8 @@ impl<T: DType> Backend<T> for CpuBackend {
             a.backend().clone(),
         );
 
-        crate::backend::private::BackendOps::mul(self, &sum_tensor, &divisor)
+        let divisor_bcast = divisor._broadcast_to(sum_tensor.layout().shape().as_slice())?;
+        crate::backend::private::BackendOps::mul(self, &sum_tensor, &divisor_bcast)
     }
 
     fn max_dim(
@@ -693,7 +694,7 @@ impl CpuBackend {
 
             let mut max_val =
                 num_traits::cast::<f64, T>(std::f64::NEG_INFINITY).ok_or_else(|| {
-                    crate::error::Error::DTypeCastFailed {
+                    Error::DTypeCastFailed {
                         from: "f64",
                         to:   std::any::type_name::<T>(),
                     }
@@ -709,19 +710,14 @@ impl CpuBackend {
                 let in_idx = layout.ravel_index(&in_coord)?;
                 let val = in_data[in_idx];
 
-                let val_f64 = val
-                    .to_f64()
-                    .ok_or_else(|| crate::error::Error::DTypeCastFailed {
-                        from: std::any::type_name::<T>(),
-                        to:   "f64",
-                    })?;
-                let max_f64 =
-                    max_val
-                        .to_f64()
-                        .ok_or_else(|| crate::error::Error::DTypeCastFailed {
-                            from: std::any::type_name::<T>(),
-                            to:   "f64",
-                        })?;
+                let val_f64 = val.to_f64().ok_or_else(|| Error::DTypeCastFailed {
+                    from: std::any::type_name::<T>(),
+                    to:   "f64",
+                })?;
+                let max_f64 = max_val.to_f64().ok_or_else(|| Error::DTypeCastFailed {
+                    from: std::any::type_name::<T>(),
+                    to:   "f64",
+                })?;
 
                 if val_f64 > max_f64 {
                     max_val = val;
