@@ -883,6 +883,83 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
     }
 }
 
+impl<T: FloatDType, B: Backend<T>> Tensor<T, B> {
+    /// Create a new tensor with values drawn from a standard normal
+    /// distribution.
+    pub fn randn(shape: Vec<usize>, backend: Arc<B>) -> Result<Self> {
+        use rand_distr::{Distribution, Normal};
+        let normal = Normal::new(0.0_f64, 1.0_f64)
+            .map_err(|e| Error::DistributionError { msg: e.to_string() })?;
+        let mut rng = rand::rng();
+
+        let layout = TensorLayout::new(shape);
+        let numel = layout.shape().numel();
+        let mut data = Vec::with_capacity(numel);
+        for _ in 0..numel {
+            let sample = normal.sample(&mut rng);
+            let val = num_traits::cast::<f64, T>(sample).ok_or_else(|| Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
+            })?;
+            data.push(val);
+        }
+
+        let storage = backend.from_vec(data);
+        Ok(Self::from_parts(storage, layout, backend))
+    }
+
+    /// Create a new tensor with values drawn from a uniform distribution over
+    /// `[-bound, bound)`.
+    pub fn rand_uniform(shape: Vec<usize>, bound: f64, backend: Arc<B>) -> Result<Self> {
+        use rand_distr::{Distribution, Uniform};
+        let uniform = Uniform::new(-bound, bound)
+            .map_err(|e| Error::DistributionError { msg: e.to_string() })?;
+        let mut rng = rand::rng();
+
+        let layout = TensorLayout::new(shape);
+        let numel = layout.shape().numel();
+        let mut data = Vec::with_capacity(numel);
+        for _ in 0..numel {
+            let sample = uniform.sample(&mut rng);
+            let val = num_traits::cast::<f64, T>(sample).ok_or_else(|| Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
+            })?;
+            data.push(val);
+        }
+
+        let storage = backend.from_vec(data);
+        Ok(Self::from_parts(storage, layout, backend))
+    }
+
+    /// Application of Kaiming He uniform initialization.
+    pub fn kaiming_uniform(shape: Vec<usize>, backend: Arc<B>) -> Result<Self> {
+        let fan_in = if shape.len() >= 2 {
+            shape.iter().skip(1).product::<usize>() as f64
+        } else {
+            shape.iter().product::<usize>() as f64
+        };
+        // Gain is usually sqrt(2) for ReLU, but let's just use bound = sqrt(3 / fan_in)
+        // following standard Kaiming Uniform.
+        let bound = (3.0_f64 / fan_in).sqrt();
+        Self::rand_uniform(shape, bound, backend)
+    }
+
+    /// Application of Xavier/Glorot uniform initialization.
+    pub fn xavier_uniform(shape: Vec<usize>, backend: Arc<B>) -> Result<Self> {
+        let (fan_in, fan_out) = if shape.len() >= 2 {
+            let fan_out = shape[0] as f64;
+            let fan_in = shape.iter().skip(1).product::<usize>() as f64;
+            (fan_in, fan_out)
+        } else {
+            let numel = shape.iter().product::<usize>() as f64;
+            (numel, numel)
+        };
+        let bound = (6.0_f64 / (fan_in + fan_out)).sqrt();
+        Self::rand_uniform(shape, bound, backend)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

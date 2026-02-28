@@ -691,12 +691,13 @@ impl CpuBackend {
                 }
             }
 
-            let mut max_val = num_traits::cast::<f64, T>(std::f64::NEG_INFINITY).ok_or_else(|| {
-                crate::error::Error::DTypeCastFailed {
-                    from: "f64",
-                    to:   std::any::type_name::<T>(),
-                }
-            })?;
+            let mut max_val =
+                num_traits::cast::<f64, T>(std::f64::NEG_INFINITY).ok_or_else(|| {
+                    crate::error::Error::DTypeCastFailed {
+                        from: "f64",
+                        to:   std::any::type_name::<T>(),
+                    }
+                })?;
             let mut current_reduction_coord = vec![0; reduced_dims_lens.len()];
 
             'outer: loop {
@@ -707,16 +708,21 @@ impl CpuBackend {
 
                 let in_idx = layout.ravel_index(&in_coord)?;
                 let val = in_data[in_idx];
-                
-                let val_f64 = val.to_f64().ok_or_else(|| crate::error::Error::DTypeCastFailed {
-                    from: std::any::type_name::<T>(),
-                    to:   "f64",
-                })?;
-                let max_f64 = max_val.to_f64().ok_or_else(|| crate::error::Error::DTypeCastFailed {
-                    from: std::any::type_name::<T>(),
-                    to:   "f64",
-                })?;
-                
+
+                let val_f64 = val
+                    .to_f64()
+                    .ok_or_else(|| crate::error::Error::DTypeCastFailed {
+                        from: std::any::type_name::<T>(),
+                        to:   "f64",
+                    })?;
+                let max_f64 =
+                    max_val
+                        .to_f64()
+                        .ok_or_else(|| crate::error::Error::DTypeCastFailed {
+                            from: std::any::type_name::<T>(),
+                            to:   "f64",
+                        })?;
+
                 if val_f64 > max_f64 {
                     max_val = val;
                 }

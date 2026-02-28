@@ -88,6 +88,9 @@ pub enum Error {
         op:      &'static str,
         backend: &'static str,
     },
+    DistributionError {
+        msg: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -207,6 +210,9 @@ impl fmt::Display for Error {
                     "operation {} is not supported on backend {}",
                     op, backend
                 )
+            }
+            Error::DistributionError { msg } => {
+                write!(f, "distribution error: {}", msg)
             }
         }
     }

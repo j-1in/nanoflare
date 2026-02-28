@@ -490,9 +490,11 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for MaxOp {
         let diff = (&a - &max_bcast)?;
         let abs_diff = diff.abs()?;
         let one_tensor = Tensor::scalar(
-            num_traits::cast::<f64, T>(1.0).ok_or_else(|| crate::error::Error::DTypeCastFailed {
-                from: "f64",
-                to:   std::any::type_name::<T>(),
+            num_traits::cast::<f64, T>(1.0).ok_or_else(|| {
+                crate::error::Error::DTypeCastFailed {
+                    from: "f64",
+                    to:   std::any::type_name::<T>(),
+                }
             })?,
             backend.clone(),
         );
