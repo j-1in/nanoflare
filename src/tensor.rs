@@ -145,6 +145,27 @@ where
             Err(e) => Err(e),
         }
     }
+
+    pub fn relu(&self) -> Result<Self> {
+        match ReluOp::new(&self) {
+            Ok(op) => self.unary_op(op, |backend, a| backend.relu(a)),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn sigmoid(&self) -> Result<Self> {
+        match SigmoidOp::new(&self) {
+            Ok(op) => self.unary_op(op, |backend, a| backend.sigmoid(a)),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn tanh(&self) -> Result<Self> {
+        match TanhOp::new(&self) {
+            Ok(op) => self.unary_op(op, |backend, a| backend.tanh(a)),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 impl_binary_op!(
@@ -1150,6 +1171,60 @@ mod tests {
         let grad_a = grads.get(&a).expect("missing gradient for a");
 
         assert_eq!(grad_a.storage().as_slice(), &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn relu_backward_matches_step_function() {
+        let backend = Arc::new(CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, CpuBackend>::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![-2.0f32, 0.0, 3.0]),
+            TensorLayout::new(vec![3]),
+            backend,
+        )
+        .requires_grad(tape);
+
+        let out = a.relu().unwrap();
+        let grads = out.backward().unwrap();
+        let grad_a = grads.get(&a).expect("missing gradient for a");
+
+        assert_eq!(grad_a.storage().as_slice(), &[0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn sigmoid_backward_matches_derivative() {
+        let backend = Arc::new(CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, CpuBackend>::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![0.0f32]),
+            TensorLayout::new(vec![1]),
+            backend,
+        )
+        .requires_grad(tape);
+
+        let out = a.sigmoid().unwrap();
+        let grads = out.backward().unwrap();
+        let grad_a = grads.get(&a).expect("missing gradient for a");
+
+        assert_eq!(grad_a.storage().as_slice(), &[0.25]); // sigmoid(0) * (1 - sigmoid(0)) = 0.5 * 0.5 = 0.25
+    }
+
+    #[test]
+    fn tanh_backward_matches_derivative() {
+        let backend = Arc::new(CpuBackend::new());
+        let tape = Arc::new(Tape::<f32, CpuBackend>::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![0.0f32]),
+            TensorLayout::new(vec![1]),
+            backend,
+        )
+        .requires_grad(tape);
+
+        let out = a.tanh().unwrap();
+        let grads = out.backward().unwrap();
+        let grad_a = grads.get(&a).expect("missing gradient for a");
+
+        assert_eq!(grad_a.storage().as_slice(), &[1.0]); // 1 - tanh(0)^2 = 1 - 0 = 1
     }
 
     #[test]

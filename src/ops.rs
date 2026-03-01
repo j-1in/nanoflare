@@ -232,6 +232,149 @@ where
     }
 }
 
+/// The Rectified Linear Unit (ReLU) operation datatype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReluOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for ReluOp
+where
+    T: FloatDType,
+{
+    fn name(&self) -> &str {
+        "ReLU"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = &inputs[0];
+        let sgn_a = a.sgn()?;
+        let abs_sgn_a = sgn_a.abs()?;
+        let two = Tensor::scalar(
+            num_traits::cast::<f64, T>(2.0).ok_or_else(|| Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
+            })?,
+            backend.clone(),
+        );
+        let sum = (&sgn_a + &abs_sgn_a)?;
+        let mask = (&sum / &two)?;
+        let grad_a = (grad * &mask)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Relu(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for ReluOp
+where
+    T: FloatDType,
+{
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(ReluOp)
+    }
+}
+
+/// The Sigmoid operation datatype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SigmoidOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for SigmoidOp
+where
+    T: FloatDType,
+{
+    fn name(&self) -> &str {
+        "Sigmoid"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = &inputs[0];
+        let sig_a = a.sigmoid()?;
+        let one = Tensor::scalar(
+            num_traits::cast::<f64, T>(1.0).ok_or_else(|| Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
+            })?,
+            backend.clone(),
+        );
+        let ones_minus_sig = (&one - &sig_a)?;
+        let grad_a = (grad * &(&sig_a * &ones_minus_sig)?)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Sigmoid(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for SigmoidOp
+where
+    T: FloatDType,
+{
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(SigmoidOp)
+    }
+}
+
+/// The Hyperbolic Tangent (Tanh) operation datatype.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TanhOp;
+
+impl<T: DType, B: Backend<T>> TensorOp<T, B> for TanhOp
+where
+    T: FloatDType,
+{
+    fn name(&self) -> &str {
+        "Tanh"
+    }
+
+    fn backward(
+        &self,
+        inputs: &[Tensor<T, B>],
+        grad: &Tensor<T, B>,
+        backend: &Arc<B>,
+    ) -> Result<Vec<Tensor<T, B>>> {
+        let a = &inputs[0];
+        let tanh_a = a.tanh()?;
+        let one = Tensor::scalar(
+            num_traits::cast::<f64, T>(1.0).ok_or_else(|| Error::DTypeCastFailed {
+                from: "f64",
+                to:   std::any::type_name::<T>(),
+            })?,
+            backend.clone(),
+        );
+        let tanh_sq = (&tanh_a * &tanh_a)?;
+        let grad_a = (grad * &(&one - &tanh_sq)?)?;
+
+        Ok(vec![grad_a])
+    }
+
+    fn to_optype(&self) -> OpType {
+        OpType::Tanh(self.clone())
+    }
+}
+
+impl<T: DType, B: Backend<T>> UnaryOp<T, B> for TanhOp
+where
+    T: FloatDType,
+{
+    fn new(_a: &Tensor<T, B>) -> Result<Self> {
+        Ok(TanhOp)
+    }
+}
+
 /// The transpose operation datatype.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransposeOp {
@@ -919,6 +1062,9 @@ pub enum OpType {
     Sgn(SgnOp),
     Exp(ExpOp),
     Log(LogOp),
+    Relu(ReluOp),
+    Sigmoid(SigmoidOp),
+    Tanh(TanhOp),
     Add(AddOp),
     Sub(SubOp),
     Mul(MulOp),
@@ -1016,6 +1162,9 @@ impl OpType {
             OpType::Sum(_) => "Sum",
             OpType::Mean(_) => "Mean",
             OpType::Max(_) => "Max",
+            OpType::Relu(_) => "Relu",
+            OpType::Sigmoid(_) => "Sigmoid",
+            OpType::Tanh(_) => "Tanh",
         }
     }
 
@@ -1033,6 +1182,9 @@ impl OpType {
             OpType::Sgn(op) => op.backward(inputs, grad, backend),
             OpType::Exp(op) => op.backward(inputs, grad, backend),
             OpType::Log(op) => op.backward(inputs, grad, backend),
+            OpType::Relu(op) => op.backward(inputs, grad, backend),
+            OpType::Sigmoid(op) => op.backward(inputs, grad, backend),
+            OpType::Tanh(op) => op.backward(inputs, grad, backend),
             OpType::Add(op) => op.backward(inputs, grad, backend),
             OpType::Sub(op) => op.backward(inputs, grad, backend),
             OpType::Mul(op) => op.backward(inputs, grad, backend),

@@ -29,6 +29,15 @@ pub(crate) mod private {
         fn log(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
         where
             T: FloatDType;
+        fn relu(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
+        where
+            T: FloatDType;
+        fn sigmoid(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
+        where
+            T: FloatDType;
+        fn tanh(&self, a: &Tensor<T, B>) -> Result<Tensor<T, B>>
+        where
+            T: FloatDType;
         fn add(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
         fn sub(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;
         fn mul(&self, a: &Tensor<T, B>, b: &Tensor<T, B>) -> Result<Tensor<T, B>>;

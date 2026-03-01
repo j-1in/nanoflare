@@ -243,6 +243,45 @@ impl<T: DType> private::BackendOps<T, CpuBackend> for CpuBackend {
         self.strided_unary_op(a, |x| FloatDType::log(x))
     }
 
+    fn relu(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| if x > T::zero() { x } else { T::zero() });
+        }
+
+        self.strided_unary_op(a, |x| if x > T::zero() { x } else { T::zero() })
+    }
+
+    fn sigmoid(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| {
+                let one = T::one();
+                one / (one + FloatDType::exp(-x))
+            });
+        }
+
+        self.strided_unary_op(a, |x| {
+            let one = T::one();
+            one / (one + FloatDType::exp(-x))
+        })
+    }
+
+    fn tanh(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        if a.layout().is_contiguous() {
+            return self.contiguous_unary_op(a, |x| FloatDType::tanh(x));
+        }
+
+        self.strided_unary_op(a, |x| FloatDType::tanh(x))
+    }
+
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {
         if a.layout().is_contiguous() && b.layout().is_contiguous() {
             return self.contiguous_binary_op(a, b, |x, y| x + y);
@@ -895,6 +934,42 @@ mod tests {
         for &v in out.storage().as_slice() {
             assert!((v - expected).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn relu_basic_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![-1.0f32, 0.0, 2.0, -5.0, 5.0]),
+            TensorLayout::new(vec![5]),
+            backend.clone(),
+        );
+        let out = a.relu().unwrap();
+        assert_eq!(out.storage().as_slice(), &[0.0, 0.0, 2.0, 0.0, 5.0]);
+    }
+
+    #[test]
+    fn sigmoid_basic_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![0.0f32]),
+            TensorLayout::new(vec![1]),
+            backend.clone(),
+        );
+        let out = a.sigmoid().unwrap();
+        assert_eq!(out.storage().as_slice(), &[0.5]);
+    }
+
+    #[test]
+    fn tanh_basic_f32() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![0.0f32]),
+            TensorLayout::new(vec![1]),
+            backend.clone(),
+        );
+        let out = a.tanh().unwrap();
+        assert_eq!(out.storage().as_slice(), &[0.0]);
     }
 
     #[test]

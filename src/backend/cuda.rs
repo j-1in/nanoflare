@@ -101,11 +101,32 @@ impl<T: DType> private::BackendOps<T, CudaBackend> for CudaBackend {
         Err(Error::UnsupportedOperation { op: "exp", backend: "cuda" })
     }
 
-    fn log(&self, a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    fn log(&self, _a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
     where
         T: FloatDType,
     {
         Err(Error::UnsupportedOperation { op: "log", backend: "cuda" })
+    }
+
+    fn relu(&self, _a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        Err(Error::UnsupportedOperation { op: "relu", backend: "cuda" })
+    }
+
+    fn sigmoid(&self, _a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        Err(Error::UnsupportedOperation { op: "sigmoid", backend: "cuda" })
+    }
+
+    fn tanh(&self, _a: &Tensor<T, Self>) -> Result<Tensor<T, Self>>
+    where
+        T: FloatDType,
+    {
+        Err(Error::UnsupportedOperation { op: "tanh", backend: "cuda" })
     }
 
     fn add(&self, a: &Tensor<T, Self>, b: &Tensor<T, Self>) -> Result<Tensor<T, Self>> {

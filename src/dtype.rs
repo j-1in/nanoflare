@@ -115,6 +115,7 @@ impl_sgn_unsigned!(u8 u16 u32 u64);
 pub trait FloatDType: DType + Float {
     fn exp(self) -> Self;
     fn log(self) -> Self;
+    fn tanh(self) -> Self;
 }
 
 impl FloatDType for f32 {
@@ -125,6 +126,10 @@ impl FloatDType for f32 {
     fn log(self) -> Self {
         self.ln()
     }
+
+    fn tanh(self) -> Self {
+        self.tanh()
+    }
 }
 
 impl FloatDType for f64 {
@@ -134,6 +139,10 @@ impl FloatDType for f64 {
 
     fn log(self) -> Self {
         self.ln()
+    }
+
+    fn tanh(self) -> Self {
+        self.tanh()
     }
 }
 
