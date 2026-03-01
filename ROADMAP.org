@@ -4,14 +4,14 @@ This document outlines the development plan for ~nanoflare~, a lightweight Rust 
 
 *Goal:* Build a functional, educational deep learning library capable of enabling modern architecture experimentation (e.g., Transformers), primarily to learn Rust and machine learning.
 
-** Phase 1: Core Foundation [2/4]
+** Phase 1: Core Foundation [3/4]
 - [X] *Tensor Structure*: Strided layout implementation (~TensorLayout~) supporting arbitrary dimensions and slicing.
 - [X] *Backend Abstraction*: Trait-based design (~Backend<T>~) to separate logic from hardware implementation.
-- [-] *CPU Backend (Basic)*:
+- [X] *CPU Backend (Basic)*:
     - [X] Contiguous and strided memory layout support.
     - [X] Basic element-wise arithmetic (Add, Sub, Mul, Div).
     - [X] Type casting.
-    - [-] Basic unary operations.
+    - [X] Basic unary operations.
         - [X] Exponentiation
         - [X] log
         - [X] Negation, absolute
@@ -22,12 +22,12 @@ This document outlines the development plan for ~nanoflare~, a lightweight Rust 
 
 ** Phase 2: CPU Efficiency & Parallelism
 - [X] *Broadcasting*: Implement NumPy-style broadcasting for binary operations.
-- [-] *More operations*: more tensor operations:
+- [X] *More operations*: more tensor operations:
     - [X] Matrix Multiplication
-    - [ ] Activation functions
+    - [X] Activation functions
 - [ ] *rayon Integration*: Parallelize ~CpuBackend~ operations using ~rayon~ to utilize all CPU cores.
 - [ ] *Optimized Matrix Multiplication*: Implement tiling/blocking and parallelization for ~matmul~.
-- [ ] *Reliability*: Improve error handling coverage and unit tests for edge cases.
+- [X] *Reliability*: Improve error handling coverage and unit tests for edge cases.
 
 ** Phase 3: Neural Network Primitives
 - [ ] *Module System*: Design a ~Module~ trait for composable layers (parameter management, forward pass).

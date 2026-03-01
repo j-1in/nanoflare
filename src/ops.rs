@@ -868,9 +868,18 @@ impl<T: DType, B: Backend<T>> TensorOp<T, B> for DotOp {
         &self,
         inputs: &[Tensor<T, B>],
         grad: &Tensor<T, B>,
-        backend: &Arc<B>,
+        _backend: &Arc<B>,
     ) -> Result<Vec<Tensor<T, B>>> {
-        todo!("Dot backward not implemented yet; \n{inputs:?}, \n{grad:?}, \n{backend:?}")
+        let a = &inputs[0];
+        let b = &inputs[1];
+
+        // y = a \cdot b
+        // dy/da = b * grad
+        // dy/db = a * grad
+        let grad_a = (b * grad)?;
+        let grad_b = (a * grad)?;
+
+        Ok(vec![grad_a, grad_b])
     }
 
     fn to_optype(&self) -> OpType {
@@ -1375,6 +1384,36 @@ mod tests {
         let b = Tensor::<f32, _>::zeros(TensorLayout::new(vec![3]), backend);
 
         assert!(DotOp::new(&a, &b).is_ok());
+    }
+
+    #[test]
+    fn test_dot_op_backward() {
+        let backend = Arc::new(CpuBackend::new());
+        let a = Tensor::from_parts(
+            backend.from_vec(vec![1.0f32, 2.0, 3.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let b = Tensor::from_parts(
+            backend.from_vec(vec![4.0f32, 5.0, 6.0]),
+            TensorLayout::new(vec![3]),
+            backend.clone(),
+        );
+        let grad = Tensor::from_parts(
+            backend.from_vec(vec![2.0f32]),
+            TensorLayout::new(vec![1]),
+            backend.clone(),
+        );
+
+        let op = DotOp::new(&a, &b).unwrap();
+        let grads = op.backward(&[a.clone(), b.clone()], &grad, &backend).unwrap();
+
+        assert_eq!(grads.len(), 2);
+        assert_eq!(grads[0].layout().shape().as_slice(), &[3]);
+        assert_eq!(grads[1].layout().shape().as_slice(), &[3]);
+        
+        assert_eq!(grads[0].storage().as_slice(), &[8.0, 10.0, 12.0]);
+        assert_eq!(grads[1].storage().as_slice(), &[2.0, 4.0, 6.0]);
     }
 
     #[test]
