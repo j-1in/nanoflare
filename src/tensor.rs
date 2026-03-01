@@ -482,42 +482,52 @@ impl<T: DType, B: Backend<T>> Tensor<T, B> {
             return Ok(out);
         }
 
-        let tape = match (&self.tape, &rhs.tape) {
-            (Some(left), Some(right)) if Arc::ptr_eq(left, right) => Some(left.clone()),
-            (Some(left), None) => Some(left.clone()),
-            (None, Some(right)) => Some(right.clone()),
+        let tape = match (self.requires_grad, rhs.requires_grad, &self.tape, &rhs.tape) {
+            (true, true, Some(left), Some(right)) => {
+                if Arc::ptr_eq(left, right) {
+                    Some(left.clone())
+                } else {
+                    return Err(Error::MixedTapeBinaryOp);
+                }
+            }
+            (true, _, Some(left), _) => Some(left.clone()),
+            (_, true, _, Some(right)) => Some(right.clone()),
             _ => None,
         };
 
-        if let Some(tape) = tape {
-            let left_id = self.node_id.unwrap_or_else(|| {
-                tape.add_node(Node::new(
-                    OpType::Leaf,
-                    Vec::new(),
-                    self.layout.clone(),
-                    self.storage.clone(),
-                ))
+        let Some(tape) = tape else {
+            return Err(Error::RequiresGradUnsupported {
+                op: "binary operation without an attached autograd tape",
             });
+        };
 
-            let right_id = rhs.node_id.unwrap_or_else(|| {
-                tape.add_node(Node::new(
-                    OpType::Leaf,
-                    Vec::new(),
-                    rhs.layout.clone(),
-                    rhs.storage.clone(),
-                ))
-            });
+        let left_id = self.node_id.unwrap_or_else(|| {
+            tape.add_node(Node::new(
+                OpType::Leaf,
+                Vec::new(),
+                self.layout.clone(),
+                self.storage.clone(),
+            ))
+        });
 
-            let out_id = tape.add_node(Node::new(
-                op.to_optype(),
-                vec![left_id, right_id],
-                out.layout.clone(),
-                out.storage.clone(),
-            ));
+        let right_id = rhs.node_id.unwrap_or_else(|| {
+            tape.add_node(Node::new(
+                OpType::Leaf,
+                Vec::new(),
+                rhs.layout.clone(),
+                rhs.storage.clone(),
+            ))
+        });
 
-            out.tape = Some(tape);
-            out.node_id = Some(out_id);
-        }
+        let out_id = tape.add_node(Node::new(
+            op.to_optype(),
+            vec![left_id, right_id],
+            out.layout.clone(),
+            out.storage.clone(),
+        ));
+
+        out.tape = Some(tape);
+        out.node_id = Some(out_id);
 
         Ok(out)
     }
@@ -1114,6 +1124,24 @@ mod tests {
                 assert_eq!(op, "unbroadcasting with mean");
                 assert_eq!(backend, "all backends");
             }
+            _ => panic!("unexpected error variant"),
+        }
+    }
+
+    #[test]
+    fn binary_op_with_mixed_tapes_errors() {
+        let backend = Arc::new(CpuBackend::new());
+        let tape_a = Arc::new(Tape::<f32, CpuBackend>::new());
+        let tape_b = Arc::new(Tape::<f32, CpuBackend>::new());
+
+        let a = Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 2]), backend.clone())
+            .requires_grad(tape_a);
+        let b =
+            Tensor::<f32, _>::ones(TensorLayout::new(vec![2, 2]), backend).requires_grad(tape_b);
+
+        let err = (&a + &b).unwrap_err();
+        match err {
+            Error::MixedTapeBinaryOp => {}
             _ => panic!("unexpected error variant"),
         }
     }

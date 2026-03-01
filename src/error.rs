@@ -84,6 +84,7 @@ pub enum Error {
     RequiresGradUnsupported {
         op: &'static str,
     },
+    MixedTapeBinaryOp,
     UnsupportedOperation {
         op:      &'static str,
         backend: &'static str,
@@ -202,6 +203,13 @@ impl fmt::Display for Error {
                     f,
                     "operation {} is not supported when requires_grad = true",
                     op
+                )
+            }
+            Error::MixedTapeBinaryOp => {
+                write!(
+                    f,
+                    "binary operation between tensors attached to different autograd tapes is not \
+                     supported"
                 )
             }
             Error::UnsupportedOperation { op, backend } => {

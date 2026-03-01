@@ -731,13 +731,7 @@ impl CpuBackend {
                 }
             }
 
-            let mut max_val =
-                num_traits::cast::<f64, T>(std::f64::NEG_INFINITY).ok_or_else(|| {
-                    Error::DTypeCastFailed {
-                        from: "f64",
-                        to:   std::any::type_name::<T>(),
-                    }
-                })?;
+            let mut max_val: Option<T> = None;
             let mut current_reduction_coord = vec![0; reduced_dims_lens.len()];
 
             'outer: loop {
@@ -749,17 +743,21 @@ impl CpuBackend {
                 let in_idx = layout.ravel_index(&in_coord)?;
                 let val = in_data[in_idx];
 
-                let val_f64 = val.to_f64().ok_or_else(|| Error::DTypeCastFailed {
-                    from: std::any::type_name::<T>(),
-                    to:   "f64",
-                })?;
-                let max_f64 = max_val.to_f64().ok_or_else(|| Error::DTypeCastFailed {
-                    from: std::any::type_name::<T>(),
-                    to:   "f64",
-                })?;
+                if let Some(curr_max) = max_val {
+                    let val_f64 = val.to_f64().ok_or_else(|| Error::DTypeCastFailed {
+                        from: std::any::type_name::<T>(),
+                        to:   "f64",
+                    })?;
+                    let max_f64 = curr_max.to_f64().ok_or_else(|| Error::DTypeCastFailed {
+                        from: std::any::type_name::<T>(),
+                        to:   "f64",
+                    })?;
 
-                if val_f64 > max_f64 {
-                    max_val = val;
+                    if val_f64 > max_f64 {
+                        max_val = Some(val);
+                    }
+                } else {
+                    max_val = Some(val);
                 }
 
                 for i in (0..reduced_dims_lens.len()).rev() {
@@ -776,7 +774,10 @@ impl CpuBackend {
                     break;
                 }
             }
-            out_data.push(max_val);
+            out_data.push(max_val.ok_or(Error::UnsupportedOperation {
+                op:      "max_dim on an empty reduction axis",
+                backend: "cpu",
+            })?);
         }
 
         let out_storage = Arc::new(CpuStorage::new(out_data));
@@ -784,7 +785,7 @@ impl CpuBackend {
         Ok(Tensor::from_parts(
             out_storage,
             out_layout,
-            Arc::new(CpuBackend),
+            a.backend().clone(),
         ))
     }
 
@@ -1118,6 +1119,29 @@ mod tests {
         let out = backend.sum_dim(&view, vec![1], false).unwrap();
         assert_eq!(out.layout().shape().as_slice(), &[4]);
         assert_eq!(out.storage().as_slice(), &[2.0, 10.0, 18.0, 26.0]);
+    }
+
+    #[test]
+    fn max_dim_supports_integer_dtype() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 3]);
+        let storage = backend.from_vec(vec![1i32, 3, 2, 4, 6, 5]);
+        let a = Tensor::from_parts(storage, layout, backend.clone());
+
+        let out = backend.max_dim(&a, vec![1], false).unwrap();
+        assert_eq!(out.layout().shape().as_slice(), &[2]);
+        assert_eq!(out.storage().as_slice(), &[3, 6]);
+    }
+
+    #[test]
+    fn max_dim_preserves_backend_instance() {
+        let backend = Arc::new(CpuBackend::new());
+        let layout = TensorLayout::new(vec![2, 3]);
+        let storage = backend.from_vec(vec![1.0f32, 3.0, 2.0, 4.0, 6.0, 5.0]);
+        let a = Tensor::from_parts(storage, layout, backend.clone());
+
+        let out = backend.max_dim(&a, vec![1], false).unwrap();
+        assert!(Arc::ptr_eq(out.backend(), &backend));
     }
 
     #[test]

@@ -1406,12 +1406,14 @@ mod tests {
         );
 
         let op = DotOp::new(&a, &b).unwrap();
-        let grads = op.backward(&[a.clone(), b.clone()], &grad, &backend).unwrap();
+        let grads = op
+            .backward(&[a.clone(), b.clone()], &grad, &backend)
+            .unwrap();
 
         assert_eq!(grads.len(), 2);
         assert_eq!(grads[0].layout().shape().as_slice(), &[3]);
         assert_eq!(grads[1].layout().shape().as_slice(), &[3]);
-        
+
         assert_eq!(grads[0].storage().as_slice(), &[8.0, 10.0, 12.0]);
         assert_eq!(grads[1].storage().as_slice(), &[2.0, 4.0, 6.0]);
     }
